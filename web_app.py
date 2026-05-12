@@ -458,6 +458,7 @@ def render_intro(lang: str) -> None:
                 data=DEFAULT_UPLOAD_CONFIG.encode("utf-8"),
                 file_name="tradetest_config_template.yaml",
                 mime="application/x-yaml",
+                key=f"download_template_intro_{lang}",
                 use_container_width=True,
             )
         with t2:
@@ -466,6 +467,7 @@ def render_intro(lang: str) -> None:
                 data=prompt_text(lang).encode("utf-8"),
                 file_name=f"tradetest_gpt_prompt_{lang}.txt",
                 mime="text/plain",
+                key=f"download_prompt_intro_{lang}",
                 use_container_width=True,
             )
 
@@ -567,6 +569,7 @@ def render_result(summary, portfolio_df, trades_df, report_bytes, lang: str):
         data=report_bytes,
         file_name="backtest_report.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"download_report_{lang}",
         use_container_width=True,
     )
 
@@ -626,7 +629,7 @@ st.set_page_config(page_title=APP_NAME, page_icon="TT", layout="wide")
 
 cloud = CloudStore(get_streamlit_secrets())
 with st.sidebar:
-    lang_label = st.selectbox("Language / 语言", ["中文", "English"], index=0)
+    lang_label = st.selectbox("Language / 语言", ["中文", "English"], index=0, key="language_selector")
     lang = "zh" if lang_label == "中文" else "en"
 
     st.header(tr(lang, "cloud"))
@@ -646,7 +649,7 @@ main_tab, history_tab = st.tabs([tr(lang, "run_tab"), tr(lang, "history_tab")])
 
 with main_tab:
     mode_labels = [tr(lang, "guided_form"), tr(lang, "upload_yaml")]
-    mode_label = st.radio(tr(lang, "config_source"), mode_labels, horizontal=True)
+    mode_label = st.radio(tr(lang, "config_source"), mode_labels, horizontal=True, key="config_source")
     mode = "Guided form" if mode_label == tr(lang, "guided_form") else "Upload YAML"
 
     if mode == "Guided form":
@@ -657,6 +660,7 @@ with main_tab:
                 [label_for(lang, "monthly_rebalance"), label_for(lang, "ma_crossover")],
                 index=0,
                 help=tr(lang, "strategy_help"),
+                key=f"strategy_selector_{lang}",
             )
             mode_strategy = value_from_label(lang, strategy_label)
             execution_label = c2.selectbox(
@@ -664,6 +668,7 @@ with main_tab:
                 [label_for(lang, "next_open")],
                 index=0,
                 help=tr(lang, "execution_help"),
+                key=f"execution_selector_{lang}",
             )
             execution_timing = value_from_label(lang, execution_label)
             rebalance_label = c3.selectbox(
@@ -671,6 +676,7 @@ with main_tab:
                 [label_for(lang, "daily"), label_for(lang, "weekly"), label_for(lang, "monthly")],
                 index=2,
                 help=tr(lang, "rebalance_help"),
+                key=f"rebalance_selector_{lang}",
             )
             rebalance_frequency = value_from_label(lang, rebalance_label)
 
@@ -737,6 +743,7 @@ with main_tab:
                 data=DEFAULT_UPLOAD_CONFIG.encode("utf-8"),
                 file_name="tradetest_config_template.yaml",
                 mime="application/x-yaml",
+                key=f"download_template_upload_{lang}",
                 use_container_width=True,
             )
         with u2:
@@ -745,6 +752,7 @@ with main_tab:
                 data=prompt_text(lang).encode("utf-8"),
                 file_name=f"tradetest_gpt_prompt_{lang}.txt",
                 mime="text/plain",
+                key=f"download_prompt_upload_{lang}",
                 use_container_width=True,
             )
         st.caption(tr(lang, "yaml_tip"))
@@ -754,7 +762,7 @@ with main_tab:
         config_text = st.text_area(tr(lang, "yaml_label"), value=st.session_state.config_text, height=420)
         st.session_state.config_text = config_text
 
-        if st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True):
+        if st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key=f"run_upload_{lang}"):
             try:
                 cfg = yaml.safe_load(config_text)
                 summary, portfolio_df, trades_df, report_bytes, chart_bytes = run_backtest_from_cfg(cfg, config_text, lang)
