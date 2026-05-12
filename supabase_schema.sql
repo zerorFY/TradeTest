@@ -25,6 +25,39 @@ create index if not exists backtest_runs_created_at_idx
 create index if not exists backtest_runs_terminal_id_idx
   on public.backtest_runs (terminal_id);
 
--- Create a Supabase Storage bucket named `tradetest-reports`.
--- For the simplest shared-history version, make it public.
--- If Row Level Security is enabled, add insert/select policies for your chosen key model.
+alter table public.backtest_runs enable row level security;
+
+drop policy if exists "tradetest read runs" on public.backtest_runs;
+create policy "tradetest read runs"
+  on public.backtest_runs
+  for select
+  using (true);
+
+drop policy if exists "tradetest insert runs" on public.backtest_runs;
+create policy "tradetest insert runs"
+  on public.backtest_runs
+  for insert
+  with check (true);
+
+insert into storage.buckets (id, name, public)
+values ('tradetest-reports', 'tradetest-reports', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "tradetest read reports" on storage.objects;
+create policy "tradetest read reports"
+  on storage.objects
+  for select
+  using (bucket_id = 'tradetest-reports');
+
+drop policy if exists "tradetest upload reports" on storage.objects;
+create policy "tradetest upload reports"
+  on storage.objects
+  for insert
+  with check (bucket_id = 'tradetest-reports');
+
+drop policy if exists "tradetest update reports" on storage.objects;
+create policy "tradetest update reports"
+  on storage.objects
+  for update
+  using (bucket_id = 'tradetest-reports')
+  with check (bucket_id = 'tradetest-reports');

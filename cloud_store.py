@@ -7,10 +7,11 @@ import requests
 
 
 class CloudStore:
-    def __init__(self) -> None:
-        self.url = os.environ.get("SUPABASE_URL", "").rstrip("/")
-        self.key = os.environ.get("SUPABASE_KEY", "")
-        self.bucket = os.environ.get("SUPABASE_BUCKET", "tradetest-reports")
+    def __init__(self, secrets: dict[str, Any] | None = None) -> None:
+        secrets = secrets or {}
+        self.url = str(secrets.get("SUPABASE_URL") or os.environ.get("SUPABASE_URL", "")).rstrip("/")
+        self.key = str(secrets.get("SUPABASE_KEY") or os.environ.get("SUPABASE_KEY", ""))
+        self.bucket = str(secrets.get("SUPABASE_BUCKET") or os.environ.get("SUPABASE_BUCKET", "tradetest-reports"))
         self.enabled = bool(self.url and self.key)
 
     @property
@@ -102,4 +103,3 @@ class CloudStore:
 
 def default_terminal_id() -> str:
     return os.environ.get("TRADETEST_TERMINAL_ID") or f"{os.environ.get('COMPUTERNAME', 'terminal')}".lower()
-

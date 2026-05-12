@@ -16,6 +16,13 @@ st.set_page_config(page_title=APP_NAME, page_icon="TT", layout="wide")
 st.title(APP_NAME)
 st.caption("Backtest workspace with guided config, YAML upload, cloud history, and report download.")
 
+
+def get_streamlit_secrets() -> dict:
+    try:
+        return dict(st.secrets)
+    except Exception:
+        return {}
+
 DEFAULT_UPLOAD_CONFIG = """data:
   symbols:
     VFV.TO: "VFV"
@@ -192,7 +199,7 @@ def build_cfg_from_wizard(
     return cfg
 
 
-cloud = CloudStore()
+cloud = CloudStore(get_streamlit_secrets())
 with st.sidebar:
     st.header("Cloud")
     terminal_id = st.text_input("Terminal ID", value=default_terminal_id())
@@ -329,4 +336,3 @@ with history_tab:
                     st.link_button("Open Excel report", row["report_xlsx_url"], use_container_width=True)
         except Exception as e:
             st.error(f"Could not load cloud history: {e}")
-
