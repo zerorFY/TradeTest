@@ -1,3 +1,4 @@
+import hashlib
 import tempfile
 from pathlib import Path
 
@@ -421,11 +422,6 @@ def label_for(lang: str, value: str) -> str:
     return OPTION_LABELS[lang].get(str(value), str(value))
 
 
-def value_from_label(lang: str, label: str) -> str:
-    reverse = {display: value for value, display in OPTION_LABELS[lang].items()}
-    return reverse.get(label, label)
-
-
 def localize_summary_values(df: pd.DataFrame, lang: str) -> pd.DataFrame:
     output = df.copy()
     for col in ["strategy_type", "execution_timing", "rebalance_frequency"]:
@@ -633,8 +629,8 @@ with st.sidebar:
     lang = "zh" if lang_label == "中文" else "en"
 
     st.header(tr(lang, "cloud"))
-    terminal_id = st.text_input(tr(lang, "terminal_id"), value=default_terminal_id())
-    config_name = st.text_input(tr(lang, "config_name"), value="web_config")
+    terminal_id = st.text_input(tr(lang, "terminal_id"), value=default_terminal_id(), key="terminal_id")
+    config_name = st.text_input(tr(lang, "config_name"), value="web_config", key="config_name")
     if cloud.enabled:
         st.success(tr(lang, "cloud_enabled"))
     else:
@@ -648,53 +644,57 @@ render_intro(lang)
 main_tab, history_tab = st.tabs([tr(lang, "run_tab"), tr(lang, "history_tab")])
 
 with main_tab:
-    mode_labels = [tr(lang, "guided_form"), tr(lang, "upload_yaml")]
-    mode_label = st.radio(tr(lang, "config_source"), mode_labels, horizontal=True, key="config_source")
-    mode = "Guided form" if mode_label == tr(lang, "guided_form") else "Upload YAML"
+    mode = st.radio(
+        tr(lang, "config_source"),
+        ["guided", "upload"],
+        horizontal=True,
+        format_func=lambda value: tr(lang, "guided_form") if value == "guided" else tr(lang, "upload_yaml"),
+        key="config_source",
+    )
 
-    if mode == "Guided form":
+    if mode == "guided":
         with st.form("wizard_form"):
             c1, c2, c3 = st.columns(3)
-            strategy_label = c1.selectbox(
+            mode_strategy = c1.selectbox(
                 tr(lang, "strategy"),
-                [label_for(lang, "monthly_rebalance"), label_for(lang, "ma_crossover")],
+                ["monthly_rebalance", "ma_crossover"],
                 index=0,
                 help=tr(lang, "strategy_help"),
-                key=f"strategy_selector_{lang}",
+                format_func=lambda value: label_for(lang, value),
+                key="strategy_selector",
             )
-            mode_strategy = value_from_label(lang, strategy_label)
-            execution_label = c2.selectbox(
+            execution_timing = c2.selectbox(
                 tr(lang, "execution"),
-                [label_for(lang, "next_open")],
+                ["next_open"],
                 index=0,
                 help=tr(lang, "execution_help"),
-                key=f"execution_selector_{lang}",
+                format_func=lambda value: label_for(lang, value),
+                key="execution_selector",
             )
-            execution_timing = value_from_label(lang, execution_label)
-            rebalance_label = c3.selectbox(
+            rebalance_frequency = c3.selectbox(
                 tr(lang, "rebalance"),
-                [label_for(lang, "daily"), label_for(lang, "weekly"), label_for(lang, "monthly")],
+                ["daily", "weekly", "monthly"],
                 index=2,
                 help=tr(lang, "rebalance_help"),
-                key=f"rebalance_selector_{lang}",
+                format_func=lambda value: label_for(lang, value),
+                key="rebalance_selector",
             )
-            rebalance_frequency = value_from_label(lang, rebalance_label)
 
             c4, c5, c6 = st.columns(3)
-            start = c4.text_input(tr(lang, "start"), value="2021-05-10", help=f"{tr(lang, 'start_help')} {tr(lang, 'date_format_help')}")
-            end = c5.text_input(tr(lang, "end"), value="", help=f"{tr(lang, 'end_help')} {tr(lang, 'date_format_help')}")
-            symbol_text = c6.text_input(tr(lang, "tickers"), value="VFV.TO,QQC.TO,TSLA.NE", help=tr(lang, "tickers_help"))
+            start = c4.text_input(tr(lang, "start"), value="2021-05-10", help=f"{tr(lang, 'start_help')} {tr(lang, 'date_format_help')}", key="start_input")
+            end = c5.text_input(tr(lang, "end"), value="", help=f"{tr(lang, 'end_help')} {tr(lang, 'date_format_help')}", key="end_input")
+            symbol_text = c6.text_input(tr(lang, "tickers"), value="VFV.TO,QQC.TO,TSLA.NE", help=tr(lang, "tickers_help"), key="tickers_input")
 
             c7, c8, c9 = st.columns(3)
-            initial_cash = c7.number_input(tr(lang, "initial_cash"), min_value=1.0, value=10000.0, step=1000.0, help=tr(lang, "initial_cash_help"))
-            commission = c8.number_input(tr(lang, "commission"), min_value=0.0, value=1.0, step=0.1, help=tr(lang, "commission_help"))
-            slippage = c9.number_input(tr(lang, "slippage"), min_value=0.0, value=0.001, step=0.0001, format="%.4f", help=tr(lang, "slippage_help"))
+            initial_cash = c7.number_input(tr(lang, "initial_cash"), min_value=1.0, value=10000.0, step=1000.0, help=tr(lang, "initial_cash_help"), key="initial_cash_input")
+            commission = c8.number_input(tr(lang, "commission"), min_value=0.0, value=1.0, step=0.1, help=tr(lang, "commission_help"), key="commission_input")
+            slippage = c9.number_input(tr(lang, "slippage"), min_value=0.0, value=0.001, step=0.0001, format="%.4f", help=tr(lang, "slippage_help"), key="slippage_input")
 
             c10, c11, c12, c13 = st.columns(4)
-            fast_ma = c10.number_input(tr(lang, "fast_ma"), min_value=1, value=20, step=1, help=tr(lang, "fast_ma_help"))
-            slow_ma = c11.number_input(tr(lang, "slow_ma"), min_value=2, value=60, step=1, help=tr(lang, "slow_ma_help"))
-            rebalance_threshold = c12.number_input(tr(lang, "threshold"), min_value=0.0, value=0.05, step=0.01, format="%.2f", help=tr(lang, "threshold_help"))
-            cash_buffer = c13.number_input(tr(lang, "cash_buffer"), min_value=0.0, value=0.02, step=0.01, format="%.2f", help=tr(lang, "cash_buffer_help"))
+            fast_ma = c10.number_input(tr(lang, "fast_ma"), min_value=1, value=20, step=1, help=tr(lang, "fast_ma_help"), key="fast_ma_input")
+            slow_ma = c11.number_input(tr(lang, "slow_ma"), min_value=2, value=60, step=1, help=tr(lang, "slow_ma_help"), key="slow_ma_input")
+            rebalance_threshold = c12.number_input(tr(lang, "threshold"), min_value=0.0, value=0.05, step=0.01, format="%.2f", help=tr(lang, "threshold_help"), key="threshold_input")
+            cash_buffer = c13.number_input(tr(lang, "cash_buffer"), min_value=0.0, value=0.02, step=0.01, format="%.2f", help=tr(lang, "cash_buffer_help"), key="cash_buffer_input")
 
             run_clicked = st.form_submit_button(tr(lang, "run_backtest"), type="primary", use_container_width=True)
 
@@ -736,6 +736,8 @@ with main_tab:
     else:
         if "config_text" not in st.session_state:
             st.session_state.config_text = DEFAULT_UPLOAD_CONFIG
+        if "yaml_text_area" not in st.session_state:
+            st.session_state.yaml_text_area = st.session_state.config_text
         u1, u2 = st.columns(2)
         with u1:
             st.download_button(
@@ -756,10 +758,16 @@ with main_tab:
                 use_container_width=True,
             )
         st.caption(tr(lang, "yaml_tip"))
-        uploaded = st.file_uploader(tr(lang, "upload_config"), type=["yaml", "yml"])
+        uploaded = st.file_uploader(tr(lang, "upload_config"), type=["yaml", "yml"], key="yaml_uploader")
         if uploaded is not None:
-            st.session_state.config_text = uploaded.getvalue().decode("utf-8")
-        config_text = st.text_area(tr(lang, "yaml_label"), value=st.session_state.config_text, height=420)
+            uploaded_bytes = uploaded.getvalue()
+            upload_signature = hashlib.sha256(uploaded_bytes).hexdigest()
+            if st.session_state.get("last_upload_signature") != upload_signature:
+                uploaded_text = uploaded_bytes.decode("utf-8")
+                st.session_state.config_text = uploaded_text
+                st.session_state.yaml_text_area = uploaded_text
+                st.session_state.last_upload_signature = upload_signature
+        config_text = st.text_area(tr(lang, "yaml_label"), height=420, key="yaml_text_area")
         st.session_state.config_text = config_text
 
         if st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key=f"run_upload_{lang}"):
@@ -811,6 +819,7 @@ with history_tab:
                     tr(lang, "open_run"),
                     df["id"].tolist(),
                     format_func=lambda x: f"{df[df['id'] == x].iloc[0]['created_at']} | {df[df['id'] == x].iloc[0]['config_name']}",
+                    key="history_run_selector",
                 )
                 row = df[df["id"] == selected].iloc[0]
                 st.code(row["config_yaml"], language="yaml")
