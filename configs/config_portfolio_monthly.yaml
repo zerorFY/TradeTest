@@ -1,0 +1,37 @@
+﻿data:
+  symbols:
+    VFV.TO: "VFV"
+    QQC.TO: "QQC"
+    TSLA.NE: "Tesla CDR CAD"
+  start: "2021-05-10"
+  end: null
+
+account:
+  initial_cash: 10000
+
+costs:
+  commission: 1.0
+  slippage: 0.001
+
+strategy:
+  type: "monthly_rebalance"
+  execution_timing: "next_open"
+  target_weights:
+    VFV.TO: 0.55
+    QQC.TO: 0.35
+    TSLA.NE: 0.10
+  rebalance_frequency: "monthly"
+  rebalance_threshold: 0.05
+  max_weights:
+    VFV.TO: 0.70
+    QQC.TO: 0.45
+    TSLA.NE: 0.15
+  min_weights:
+    VFV.TO: 0.40
+    QQC.TO: 0.20
+    TSLA.NE: 0.00
+  cash_buffer: 0.02
+
+report:
+  output_dir: "results"
+

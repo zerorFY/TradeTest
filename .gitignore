@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+
+.streamlit/secrets.toml
+.env
+
+results/
+build/
+dist/
+*.spec
+
+20260509/
+exe20260508/
+*.zip
+新建 文本文档.txt
+
+.mplbuild/
+.mplconfig/
+.yfinance_cache/

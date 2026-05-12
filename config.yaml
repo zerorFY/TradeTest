@@ -1,0 +1,15 @@
+﻿data:
+  symbol: "VFV.TO"
+  start: "2021-05-08"
+  end: null
+
+account:
+  initial_cash: 2000
+
+costs:
+  commission: 1.0
+  slippage: 0.001
+
+strategy:
+  fast_ma: 20
+  slow_ma: 60

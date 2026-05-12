@@ -1,0 +1,41 @@
+data:
+  symbols:
+    VFV.TO: "VFV"
+    QQC.TO: "QQC"
+    TSLA.NE: "Tesla CDR CAD"
+  start: "2021-08-11"   # 约5年回测；沿用上一版共同起始日
+  end: null             # null表示到今天
+
+account:
+  initial_cash: 10000   # 初始资金，CAD
+
+costs:
+  commission: 1.0       # 每次交易固定手续费
+  slippage: 0.001       # 滑点比例（0.001 = 0.1%）
+
+strategy:
+  type: "monthly_rebalance"
+
+  # 版本C：更进攻
+  target_weights:
+    VFV.TO: 0.45
+    QQC.TO: 0.40
+    TSLA.NE: 0.15
+
+  rebalance_frequency: "monthly"
+  rebalance_threshold: 0.05
+
+  max_weights:
+    VFV.TO: 0.65
+    QQC.TO: 0.50
+    TSLA.NE: 0.20
+
+  min_weights:
+    VFV.TO: 0.30
+    QQC.TO: 0.25
+    TSLA.NE: 0.00
+
+  cash_buffer: 0.02
+
+report:
+  output_dir: "results"
