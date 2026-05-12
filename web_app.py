@@ -61,6 +61,90 @@ report:
   output_dir: "results"
 """
 
+GPT_CONFIG_PROMPT = """You are helping me create a TradeTest backtest YAML config.
+
+Use the YAML template below as the exact format. Keep the same top-level sections:
+data, account, costs, strategy, report.
+
+My natural-language request:
+[Write your request here. Example: Backtest a Canadian ETF portfolio with VFV.TO 50%, QQC.TO 30%, XEI.TO 20%, starting from 2021-01-01, initial cash 20000 CAD, monthly rebalance, next open execution.]
+
+Rules:
+- Return only valid YAML.
+- Do not add Markdown fences.
+- For multiple stocks, use data.symbols as a mapping from ticker to display name.
+- target_weights must add up to about 1.0.
+- Use execution_timing: "next_open".
+- rebalance_frequency can be "daily", "weekly", or "monthly".
+- end can be null if I want the latest available data.
+
+YAML template:
+"""
+
+
+def render_intro() -> None:
+    st.markdown(
+        """
+        TradeTest helps you run stock or ETF backtests from either a guided form or a YAML config.
+        It supports multi-symbol portfolios, daily/weekly/monthly rebalancing, cloud history,
+        Excel reports, and downloadable charts.
+        """
+    )
+
+    step1, step2, step3 = st.columns(3)
+    step1.info("1. Build a config with the form, upload YAML, or ask GPT to generate YAML from the template.")
+    step2.info("2. Run the backtest with next-open execution on daily market data.")
+    step3.info("3. Review results, download the Excel report, and check cloud history later.")
+
+    with st.expander("Start here: YAML template and GPT workflow", expanded=True):
+        st.markdown(
+            """
+            Recommended workflow for non-technical users:
+
+            1. Download the YAML template below.
+            2. Give the template to GPT.
+            3. Describe your strategy in natural language.
+            4. Ask GPT to return valid YAML in the same format.
+            5. Upload that YAML in the `Upload YAML` mode and run the backtest.
+            """
+        )
+        t1, t2 = st.columns(2)
+        with t1:
+            st.download_button(
+                "Download YAML template",
+                data=DEFAULT_UPLOAD_CONFIG.encode("utf-8"),
+                file_name="tradetest_config_template.yaml",
+                mime="application/x-yaml",
+                use_container_width=True,
+            )
+        with t2:
+            st.download_button(
+                "Download GPT prompt",
+                data=(GPT_CONFIG_PROMPT + DEFAULT_UPLOAD_CONFIG).encode("utf-8"),
+                file_name="tradetest_gpt_prompt.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
+
+        st.markdown("Copy this prompt to GPT if you want it to generate a config for you:")
+        st.code(GPT_CONFIG_PROMPT + DEFAULT_UPLOAD_CONFIG, language="text")
+
+    with st.expander("What the main settings mean"):
+        st.markdown(
+            """
+            - `symbols`: Tickers to backtest. For portfolios, use multiple tickers.
+            - `initial_cash`: Starting capital.
+            - `commission`: Fixed trading cost per order.
+            - `slippage`: Estimated trading price impact, for example `0.001` means 0.1%.
+            - `strategy.type`: Use `monthly_rebalance` for portfolio rebalancing or `ma_crossover` for moving-average signals.
+            - `execution_timing`: `next_open` means signals are generated from daily data and executed at the next trading day's open.
+            - `rebalance_frequency`: `daily`, `weekly`, or `monthly`.
+            - `target_weights`: Desired portfolio weights. They should add up to about `1.0`.
+            """
+        )
+
+    st.warning("Backtests are research tools, not investment advice. Real trading can differ because of liquidity, taxes, spreads, data quality, and execution delays.")
+
 
 def run_backtest_from_cfg(cfg: dict, config_text_raw: str):
     symbols, symbol_names = backtest.parse_symbols(cfg)
@@ -131,13 +215,16 @@ def render_result(summary, portfolio_df, trades_df, report_bytes):
     m2.metric("Total Return", f"{summary['total_return']:.2%}")
     m3.metric("Max Drawdown", f"{summary['max_drawdown']:.2%}")
     m4.metric("Trade Count", str(summary["trade_count"]))
+    st.caption("Final Equity is ending portfolio value. Total Return is total portfolio gain/loss. Max Drawdown is the largest peak-to-trough decline. Trade Count counts BUY orders.")
 
     fig = px.line(portfolio_df, x="Date", y="equity", title="Portfolio Equity Curve")
     fig.update_layout(height=460, margin=dict(l=16, r=16, t=48, b=16))
     st.plotly_chart(fig, use_container_width=True)
+    st.caption("The equity curve shows portfolio value over time after costs, slippage, and strategy execution rules.")
 
     st.dataframe(pd.DataFrame([summary]), use_container_width=True)
     empty_cols = ["date", "symbol", "action", "price", "shares", "commission", "cash_after"]
+    st.markdown("Trade log")
     st.dataframe(trades_df if not trades_df.empty else pd.DataFrame(columns=empty_cols), use_container_width=True, height=280)
 
     st.download_button(
@@ -209,7 +296,9 @@ with st.sidebar:
     else:
         st.info("Set SUPABASE_URL and SUPABASE_KEY to enable cloud sync")
 
-main_tab, history_tab = st.tabs(["Run", "History"])
+render_intro()
+
+main_tab, history_tab = st.tabs(["Run Backtest", "Cloud History"])
 
 with main_tab:
     mode = st.radio("Config source", ["Guided form", "Upload YAML"], horizontal=True)
@@ -217,25 +306,25 @@ with main_tab:
     if mode == "Guided form":
         with st.form("wizard_form"):
             c1, c2, c3 = st.columns(3)
-            mode_strategy = c1.selectbox("Strategy", ["monthly_rebalance", "ma_crossover"], index=0)
-            execution_timing = c2.selectbox("Execution", ["next_open"], index=0)
-            rebalance_frequency = c3.selectbox("Rebalance", ["daily", "weekly", "monthly"], index=2)
+            mode_strategy = c1.selectbox("Strategy", ["monthly_rebalance", "ma_crossover"], index=0, help="monthly_rebalance is portfolio rebalancing. ma_crossover uses fast/slow moving averages.")
+            execution_timing = c2.selectbox("Execution", ["next_open"], index=0, help="next_open means the signal is generated from daily data and the trade executes at the next trading day's open.")
+            rebalance_frequency = c3.selectbox("Rebalance", ["daily", "weekly", "monthly"], index=2, help="How often the portfolio tries to return to target weights.")
 
             c4, c5, c6 = st.columns(3)
-            start = c4.date_input("Start", value=pd.to_datetime("2021-05-10").date())
-            end = c5.date_input("End", value=None)
-            symbol_text = c6.text_input("Tickers", value="VFV.TO,QQC.TO,TSLA.NE")
+            start = c4.date_input("Start", value=pd.to_datetime("2021-05-10").date(), help="First date used in the backtest.")
+            end = c5.date_input("End", value=None, help="Leave empty to use the latest available data.")
+            symbol_text = c6.text_input("Tickers", value="VFV.TO,QQC.TO,TSLA.NE", help="Comma-separated tickers. Example: VFV.TO,QQC.TO,TSLA.NE")
 
             c7, c8, c9 = st.columns(3)
-            initial_cash = c7.number_input("Initial cash", min_value=1.0, value=10000.0, step=1000.0)
-            commission = c8.number_input("Commission", min_value=0.0, value=1.0, step=0.1)
-            slippage = c9.number_input("Slippage", min_value=0.0, value=0.001, step=0.0001, format="%.4f")
+            initial_cash = c7.number_input("Initial cash", min_value=1.0, value=10000.0, step=1000.0, help="Starting capital for the whole portfolio.")
+            commission = c8.number_input("Commission", min_value=0.0, value=1.0, step=0.1, help="Fixed commission cost per trade.")
+            slippage = c9.number_input("Slippage", min_value=0.0, value=0.001, step=0.0001, format="%.4f", help="Estimated price impact. 0.001 means 0.1%.")
 
             c10, c11, c12, c13 = st.columns(4)
-            fast_ma = c10.number_input("Fast MA", min_value=1, value=20, step=1)
-            slow_ma = c11.number_input("Slow MA", min_value=2, value=60, step=1)
-            rebalance_threshold = c12.number_input("Threshold", min_value=0.0, value=0.05, step=0.01, format="%.2f")
-            cash_buffer = c13.number_input("Cash buffer", min_value=0.0, value=0.02, step=0.01, format="%.2f")
+            fast_ma = c10.number_input("Fast MA", min_value=1, value=20, step=1, help="Fast moving-average window for ma_crossover.")
+            slow_ma = c11.number_input("Slow MA", min_value=2, value=60, step=1, help="Slow moving-average window for ma_crossover. Must be greater than Fast MA.")
+            rebalance_threshold = c12.number_input("Threshold", min_value=0.0, value=0.05, step=0.01, format="%.2f", help="Only rebalance when a holding drifts away from target by this amount.")
+            cash_buffer = c13.number_input("Cash buffer", min_value=0.0, value=0.02, step=0.01, format="%.2f", help="Cash kept aside instead of investing 100% of capital.")
 
             run_clicked = st.form_submit_button("Run backtest", type="primary", use_container_width=True)
 
@@ -276,6 +365,24 @@ with main_tab:
     else:
         if "config_text" not in st.session_state:
             st.session_state.config_text = DEFAULT_UPLOAD_CONFIG
+        u1, u2 = st.columns(2)
+        with u1:
+            st.download_button(
+                "Download YAML template",
+                data=DEFAULT_UPLOAD_CONFIG.encode("utf-8"),
+                file_name="tradetest_config_template.yaml",
+                mime="application/x-yaml",
+                use_container_width=True,
+            )
+        with u2:
+            st.download_button(
+                "Download GPT prompt",
+                data=(GPT_CONFIG_PROMPT + DEFAULT_UPLOAD_CONFIG).encode("utf-8"),
+                file_name="tradetest_gpt_prompt.txt",
+                mime="text/plain",
+                use_container_width=True,
+            )
+        st.caption("Tip: Give the template to GPT, describe your strategy in natural language, then upload the YAML GPT returns.")
         uploaded = st.file_uploader("Upload YAML config", type=["yaml", "yml"])
         if uploaded is not None:
             st.session_state.config_text = uploaded.getvalue().decode("utf-8")
@@ -301,6 +408,12 @@ with main_tab:
                 st.error(f"Run failed: {e}")
 
 with history_tab:
+    st.markdown(
+        """
+        Cloud History stores completed backtest summaries, YAML configs, charts, and Excel reports.
+        Use `Terminal ID` and `Config name` in the sidebar to identify who ran each test and which config it used.
+        """
+    )
     if not cloud.enabled:
         st.info("Cloud history is disabled until SUPABASE_URL and SUPABASE_KEY are set.")
     else:
