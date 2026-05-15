@@ -1,6 +1,9 @@
 import hashlib
+import os
+import shutil
 import tempfile
 from pathlib import Path
+from uuid import uuid4
 
 import pandas as pd
 import plotly.express as px
@@ -14,6 +17,7 @@ from cloud_store import CloudStore, default_terminal_id
 APP_NAME = "TradeTest"
 
 DEFAULT_UPLOAD_CONFIG = """data:
+  market: "western"
   symbols:
     VFV.TO: "VFV"
     QQC.TO: "QQC"
@@ -23,6 +27,7 @@ DEFAULT_UPLOAD_CONFIG = """data:
 
 account:
   initial_cash: 10000
+  currency: "MARKET_NATIVE"
 
 costs:
   commission: 1.0
@@ -51,6 +56,46 @@ report:
   output_dir: "results"
 """
 
+CHINA_UPLOAD_CONFIG = """data:
+  market: "china"
+  symbols:
+    "600519": "Kweichow Moutai"
+    "000001": "Ping An Bank"
+    "510300": "CSI 300 ETF"
+  start: "2021-05-10"
+  end: null
+
+account:
+  initial_cash: 100000
+  currency: "CNY"
+
+costs:
+  commission: 5.0
+  slippage: 0.001
+
+strategy:
+  type: "monthly_rebalance"
+  execution_timing: "next_open"
+  target_weights:
+    "600519": 0.40
+    "000001": 0.30
+    "510300": 0.30
+  rebalance_frequency: "monthly"
+  rebalance_threshold: 0.05
+  max_weights:
+    "600519": 0.55
+    "000001": 0.45
+    "510300": 0.45
+  min_weights:
+    "600519": 0.10
+    "000001": 0.10
+    "510300": 0.10
+  cash_buffer: 0.02
+
+report:
+  output_dir: "results"
+"""
+
 GPT_CONFIG_PROMPTS = {
     "en": """You are helping me create a TradeTest backtest YAML config.
 
@@ -63,6 +108,9 @@ My natural-language request:
 Rules:
 - Return only valid YAML.
 - Do not add Markdown fences.
+- Choose exactly one data.market: "western" or "china".
+- If data.market is "china", use A-share tickers only, such as 600519, 000001, or 510300. TradeTest will convert them to Yahoo Finance suffixes automatically and use CNY.
+- If data.market is "western", do not include Chinese A-share tickers.
 - For multiple stocks, use data.symbols as a mapping from ticker to display name.
 - target_weights must add up to about 1.0.
 - Use execution_timing: "next_open".
@@ -82,6 +130,9 @@ data, account, costs, strategy, report。
 规则：
 - 只返回有效 YAML。
 - 不要添加 Markdown 代码块。
+- data.market 只能二选一："western" 或 "china"。
+- 如果 data.market 是 "china"，只能使用中国 A 股代码，例如 600519、000001 或 510300。TradeTest 会自动转换成 Yahoo Finance 后缀，并使用人民币 CNY。
+- 如果 data.market 是 "western"，不要混入中国 A 股代码。
 - 多只股票时，使用 data.symbols，把股票代码映射到显示名称。
 - target_weights 加起来应接近 1.0。
 - 使用 execution_timing: "next_open"。
@@ -115,11 +166,14 @@ Recommended workflow for non-technical users:
 5. Upload that YAML in the `Upload YAML` mode and run the backtest.
 """,
         "download_template": "Download YAML template",
+        "download_china_template": "Download China YAML template",
         "download_prompt": "Download GPT prompt",
         "copy_prompt": "Copy this prompt to GPT if you want it to generate a config for you:",
         "settings_meaning": "What the main settings mean",
         "settings_text": """
 - `symbols`: Tickers to backtest. For portfolios, use multiple tickers.
+- `market`: Choose `western` or `china`. The two markets cannot be mixed in one backtest.
+- `currency`: Automatically becomes `CNY` for China market and `MARKET_NATIVE` for western market.
 - `initial_cash`: Starting capital.
 - `commission`: Fixed trading cost per order.
 - `slippage`: Estimated trading price impact, for example `0.001` means 0.1%.
@@ -137,6 +191,11 @@ Recommended workflow for non-technical users:
         "run_tab": "Run Backtest",
         "history_tab": "Cloud History",
         "config_source": "Config source",
+        "market": "Market",
+        "western_market": "Western market",
+        "china_market": "China A-share market",
+        "market_help": "Choose one market only. China and western markets cannot be mixed in the same backtest.",
+        "currency_notice": "Selected currency: {currency}. China market automatically uses CNY to avoid FX mixing.",
         "guided_form": "Guided form",
         "upload_yaml": "Upload YAML",
         "strategy": "Strategy",
@@ -159,7 +218,7 @@ Recommended workflow for non-technical users:
         "start_help": "First date used in the backtest.",
         "end_help": "Leave empty to use the latest available data.",
         "date_format_help": "Use YYYY-MM-DD format.",
-        "tickers_help": "Comma-separated tickers. Example: VFV.TO,QQC.TO,TSLA.NE",
+        "tickers_help": "Comma-separated tickers. Western example: VFV.TO,QQC.TO,TSLA.NE. China example: 600519,000001,510300.",
         "initial_cash_help": "Starting capital for the whole portfolio.",
         "commission_help": "Fixed commission cost per trade.",
         "slippage_help": "Estimated price impact. 0.001 means 0.1%.",
@@ -215,11 +274,14 @@ TradeTest 可以通过表单或 YAML 配置运行股票/ETF 回测。
 5. 在 `上传 YAML` 模式里上传 GPT 返回的 YAML，然后运行回测。
 """,
         "download_template": "下载 YAML 模板",
+        "download_china_template": "下载中国股市 YAML 模板",
         "download_prompt": "下载 GPT 提示词",
         "copy_prompt": "如果你想让 GPT 生成配置，可以复制这段提示词：",
         "settings_meaning": "主要参数说明",
         "settings_text": """
 - `symbols`：要回测的股票代码。组合回测可以填写多只。
+- `market`：只能选择 `western` 或 `china`，同一次回测不能混合中国股市和欧美股市。
+- `currency`：中国股市自动使用 `CNY`；欧美股市使用 `MARKET_NATIVE`，不做汇率换算。
 - `initial_cash`：初始资金。
 - `commission`：每笔交易的固定手续费。
 - `slippage`：估算滑点，例如 `0.001` 表示 0.1%。
@@ -237,6 +299,11 @@ TradeTest 可以通过表单或 YAML 配置运行股票/ETF 回测。
         "run_tab": "运行回测",
         "history_tab": "云端历史",
         "config_source": "配置来源",
+        "market": "市场",
+        "western_market": "欧美股市",
+        "china_market": "中国 A 股",
+        "market_help": "市场只能二选一。同一次回测不能混合中国股市和欧美股市。",
+        "currency_notice": "当前币种：{currency}。选择中国股市会自动使用人民币 CNY，避免汇率混合。",
         "guided_form": "表单配置",
         "upload_yaml": "上传 YAML",
         "strategy": "策略",
@@ -259,7 +326,7 @@ TradeTest 可以通过表单或 YAML 配置运行股票/ETF 回测。
         "start_help": "回测使用的第一天。",
         "end_help": "留空表示使用最新可用数据。",
         "date_format_help": "请使用 YYYY-MM-DD 格式。",
-        "tickers_help": "用英文逗号分隔股票代码。例如：VFV.TO,QQC.TO,TSLA.NE",
+        "tickers_help": "用英文逗号分隔股票代码。欧美示例：VFV.TO,QQC.TO,TSLA.NE。中国示例：600519,000001,510300。",
         "initial_cash_help": "整个组合的起始资金。",
         "commission_help": "每笔交易的固定手续费。",
         "slippage_help": "估算价格冲击。0.001 表示 0.1%。",
@@ -298,6 +365,8 @@ TradeTest 可以通过表单或 YAML 配置运行股票/ETF 回测。
 
 SUMMARY_LABELS = {
     "en": {
+        "market": "Market",
+        "currency": "Currency",
         "strategy_type": "Strategy",
         "execution_timing": "Execution",
         "rebalance_frequency": "Rebalance",
@@ -313,6 +382,8 @@ SUMMARY_LABELS = {
         "buy_hold_return": "Buy-hold return",
     },
     "zh": {
+        "market": "市场",
+        "currency": "币种",
         "strategy_type": "策略",
         "execution_timing": "执行方式",
         "rebalance_frequency": "调仓频率",
@@ -383,6 +454,8 @@ OPTION_LABELS = {
         "daily": "Daily",
         "weekly": "Weekly",
         "monthly": "Monthly",
+        "western": "Western market",
+        "china": "China A-share market",
         "BUY": "Buy",
         "SELL": "Sell",
     },
@@ -393,6 +466,8 @@ OPTION_LABELS = {
         "daily": "每日",
         "weekly": "每周",
         "monthly": "每月",
+        "western": "欧美股市",
+        "china": "中国 A 股",
         "BUY": "买入",
         "SELL": "卖出",
     },
@@ -411,7 +486,7 @@ def tr(lang: str, key: str) -> str:
 
 
 def prompt_text(lang: str) -> str:
-    return GPT_CONFIG_PROMPTS[lang] + DEFAULT_UPLOAD_CONFIG
+    return GPT_CONFIG_PROMPTS[lang] + "\nWestern market YAML template:\n" + DEFAULT_UPLOAD_CONFIG + "\nChina market YAML template:\n" + CHINA_UPLOAD_CONFIG
 
 
 def rename_columns(df: pd.DataFrame, labels: dict[str, str]) -> pd.DataFrame:
@@ -424,7 +499,7 @@ def label_for(lang: str, value: str) -> str:
 
 def localize_summary_values(df: pd.DataFrame, lang: str) -> pd.DataFrame:
     output = df.copy()
-    for col in ["strategy_type", "execution_timing", "rebalance_frequency"]:
+    for col in ["market", "strategy_type", "execution_timing", "rebalance_frequency"]:
         if col in output.columns:
             output[col] = output[col].map(lambda value: label_for(lang, value) if value else value)
     return output
@@ -447,7 +522,7 @@ def render_intro(lang: str) -> None:
 
     with st.expander(tr(lang, "start_here"), expanded=True):
         st.markdown(tr(lang, "workflow"))
-        t1, t2 = st.columns(2)
+        t1, t2, t3 = st.columns(3)
         with t1:
             st.download_button(
                 tr(lang, "download_template"),
@@ -458,6 +533,15 @@ def render_intro(lang: str) -> None:
                 use_container_width=True,
             )
         with t2:
+            st.download_button(
+                tr(lang, "download_china_template"),
+                data=CHINA_UPLOAD_CONFIG.encode("utf-8"),
+                file_name="tradetest_china_config_template.yaml",
+                mime="application/x-yaml",
+                key=f"download_china_template_intro_{lang}",
+                use_container_width=True,
+            )
+        with t3:
             st.download_button(
                 tr(lang, "download_prompt"),
                 data=prompt_text(lang).encode("utf-8"),
@@ -476,7 +560,34 @@ def render_intro(lang: str) -> None:
     st.warning(tr(lang, "risk_warning"))
 
 
+def writable_temp_parent() -> Path:
+    candidates = []
+    if os.environ.get("TRADETEST_TMP_DIR"):
+        candidates.append(Path(os.environ["TRADETEST_TMP_DIR"]))
+    candidates.append(backtest.PROJECT_ROOT / ".web_tmp")
+    candidates.append(Path(tempfile.gettempdir()) / "tradetest_web_tmp")
+    if os.name == "nt":
+        candidates.append(Path(r"C:\tmp") / "tradetest_web_tmp")
+
+    errors = []
+    for parent in candidates:
+        try:
+            parent.mkdir(parents=True, exist_ok=True)
+            probe = parent / f".write_probe_{uuid4().hex}"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return parent
+        except OSError as exc:
+            errors.append(f"{parent}: {exc}")
+
+    raise PermissionError("No writable temporary directory is available. " + " | ".join(errors))
+
+
 def run_backtest_from_cfg(cfg: dict, config_text_raw: str, lang: str):
+    cfg = backtest.prepare_config(cfg)
+    config_text_raw = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
+    market = backtest.parse_market(cfg)
+    currency = cfg.get("account", {}).get("currency", backtest.currency_for_market(market))
     symbols, symbol_names = backtest.parse_symbols(cfg)
     start = cfg["data"]["start"]
     end = cfg["data"].get("end")
@@ -511,6 +622,8 @@ def run_backtest_from_cfg(cfg: dict, config_text_raw: str, lang: str):
     rebalance_frequency = str(strategy_cfg.get("rebalance_frequency", "monthly")).strip().lower()
 
     summary = {
+        "market": market,
+        "currency": currency,
         "strategy_type": strategy_type,
         "execution_timing": execution_timing,
         "rebalance_frequency": rebalance_frequency if strategy_type == "monthly_rebalance" else "",
@@ -526,8 +639,10 @@ def run_backtest_from_cfg(cfg: dict, config_text_raw: str, lang: str):
         "buy_hold_return": buy_hold_return,
     }
 
-    with tempfile.TemporaryDirectory() as td:
-        temp_dir = Path(td)
+    temp_parent = writable_temp_parent()
+    temp_dir = temp_parent / f"run_{uuid4().hex}"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    try:
         cfg_path = temp_dir / "web_config.yaml"
         cfg_path.write_text(config_text_raw, encoding="utf-8")
         backtest.save_outputs(temp_dir, portfolio_df, trades_df, summary, cfg, cfg_path)
@@ -535,6 +650,8 @@ def run_backtest_from_cfg(cfg: dict, config_text_raw: str, lang: str):
         chart_files = sorted(temp_dir.glob("equity_curve_*.png"))
         report_bytes = report_file.read_bytes()
         chart_bytes = chart_files[-1].read_bytes() if chart_files else None
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
     return summary, portfolio_df, trades_df, report_bytes, chart_bytes
 
@@ -571,6 +688,7 @@ def render_result(summary, portfolio_df, trades_df, report_bytes, lang: str):
 
 
 def build_cfg_from_wizard(
+    market,
     mode_strategy,
     symbol_text,
     start,
@@ -590,7 +708,8 @@ def build_cfg_from_wizard(
     if not symbols:
         raise ValueError(tr(lang, "invalid_tickers"))
 
-    data_part = {"start": str(start), "end": str(end) if end else None}
+    currency = backtest.currency_for_market(market)
+    data_part = {"market": market, "start": str(start), "end": str(end) if end else None}
     if len(symbols) == 1:
         data_part["symbol"] = symbols[0]
     else:
@@ -598,7 +717,7 @@ def build_cfg_from_wizard(
 
     cfg = {
         "data": data_part,
-        "account": {"initial_cash": float(initial_cash)},
+        "account": {"initial_cash": float(initial_cash), "currency": currency},
         "costs": {"commission": float(commission), "slippage": float(slippage)},
         "strategy": {"type": mode_strategy, "execution_timing": execution_timing},
         "report": {"output_dir": "results"},
@@ -653,6 +772,17 @@ with main_tab:
     )
 
     if mode == "guided":
+        market = st.radio(
+            tr(lang, "market"),
+            ["western", "china"],
+            horizontal=True,
+            help=tr(lang, "market_help"),
+            format_func=lambda value: label_for(lang, value),
+            key="market_selector",
+        )
+        currency = backtest.currency_for_market(market)
+        st.info(tr(lang, "currency_notice").format(currency=currency))
+
         with st.form("wizard_form"):
             c1, c2, c3 = st.columns(3)
             mode_strategy = c1.selectbox(
@@ -683,7 +813,8 @@ with main_tab:
             c4, c5, c6 = st.columns(3)
             start = c4.text_input(tr(lang, "start"), value="2021-05-10", help=f"{tr(lang, 'start_help')} {tr(lang, 'date_format_help')}", key="start_input")
             end = c5.text_input(tr(lang, "end"), value="", help=f"{tr(lang, 'end_help')} {tr(lang, 'date_format_help')}", key="end_input")
-            symbol_text = c6.text_input(tr(lang, "tickers"), value="VFV.TO,QQC.TO,TSLA.NE", help=tr(lang, "tickers_help"), key="tickers_input")
+            default_tickers = "600519,000001,510300" if market == "china" else "VFV.TO,QQC.TO,TSLA.NE"
+            symbol_text = c6.text_input(tr(lang, "tickers"), value=default_tickers, help=tr(lang, "tickers_help"), key=f"tickers_input_{market}")
 
             c7, c8, c9 = st.columns(3)
             initial_cash = c7.number_input(tr(lang, "initial_cash"), min_value=1.0, value=10000.0, step=1000.0, help=tr(lang, "initial_cash_help"), key="initial_cash_input")
@@ -701,6 +832,7 @@ with main_tab:
         if run_clicked:
             try:
                 cfg = build_cfg_from_wizard(
+                    market,
                     mode_strategy,
                     symbol_text,
                     start,
@@ -716,6 +848,7 @@ with main_tab:
                     cash_buffer,
                     lang,
                 )
+                cfg = backtest.prepare_config(cfg)
                 cfg_text = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
                 st.code(cfg_text, language="yaml")
                 summary, portfolio_df, trades_df, report_bytes, chart_bytes = run_backtest_from_cfg(cfg, cfg_text, lang)
@@ -738,7 +871,7 @@ with main_tab:
             st.session_state.config_text = DEFAULT_UPLOAD_CONFIG
         if "yaml_text_area" not in st.session_state:
             st.session_state.yaml_text_area = st.session_state.config_text
-        u1, u2 = st.columns(2)
+        u1, u2, u3 = st.columns(3)
         with u1:
             st.download_button(
                 tr(lang, "download_template"),
@@ -749,6 +882,15 @@ with main_tab:
                 use_container_width=True,
             )
         with u2:
+            st.download_button(
+                tr(lang, "download_china_template"),
+                data=CHINA_UPLOAD_CONFIG.encode("utf-8"),
+                file_name="tradetest_china_config_template.yaml",
+                mime="application/x-yaml",
+                key=f"download_china_template_upload_{lang}",
+                use_container_width=True,
+            )
+        with u3:
             st.download_button(
                 tr(lang, "download_prompt"),
                 data=prompt_text(lang).encode("utf-8"),
@@ -772,12 +914,13 @@ with main_tab:
 
         if st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key=f"run_upload_{lang}"):
             try:
-                cfg = yaml.safe_load(config_text)
-                summary, portfolio_df, trades_df, report_bytes, chart_bytes = run_backtest_from_cfg(cfg, config_text, lang)
+                cfg = backtest.prepare_config(yaml.safe_load(config_text))
+                prepared_config_text = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
+                summary, portfolio_df, trades_df, report_bytes, chart_bytes = run_backtest_from_cfg(cfg, prepared_config_text, lang)
                 saved = cloud.save_run(
                     terminal_id=terminal_id,
                     config_name=config_name,
-                    config_yaml=config_text,
+                    config_yaml=prepared_config_text,
                     summary=summary,
                     report_bytes=report_bytes,
                     chart_bytes=chart_bytes,

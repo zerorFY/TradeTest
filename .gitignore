@@ -18,3 +18,4 @@ exe20260508/
 .mplbuild/
 .mplconfig/
 .yfinance_cache/
+.web_tmp/

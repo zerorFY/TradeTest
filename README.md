@@ -20,12 +20,14 @@ Single symbol MA crossover:
 
 ```yaml
 data:
+  market: "western"
   symbol: "VFV.TO"
   start: "2020-01-01"
   end: null
 
 account:
   initial_cash: 10000
+  currency: "MARKET_NATIVE"
 
 costs:
   commission: 1.0
@@ -45,6 +47,7 @@ Multi-symbol periodic rebalance:
 
 ```yaml
 data:
+  market: "western"
   symbols:
     VFV.TO: "VFV"
     QQC.TO: "QQC"
@@ -54,6 +57,7 @@ data:
 
 account:
   initial_cash: 10000
+  currency: "MARKET_NATIVE"
 
 costs:
   commission: 1.0
@@ -82,6 +86,25 @@ report:
   output_dir: "results"
 ```
 
+China A-share example:
+
+```yaml
+data:
+  market: "china"
+  symbols:
+    "600519": "Kweichow Moutai"
+    "000001": "Ping An Bank"
+    "510300": "CSI 300 ETF"
+  start: "2021-05-10"
+  end: null
+
+account:
+  initial_cash: 100000
+  currency: "CNY"
+```
+
+`data.market` must be either `western` or `china`. Do not mix China A-shares with western tickers in the same backtest. China tickers like `600519` and `000001` are converted automatically to Yahoo Finance symbols such as `600519.SS` and `000001.SZ`.
+
 ## Web Features
 
 - Guided config form or YAML upload
@@ -106,4 +129,3 @@ streamlit run web_app.py
 
 Create the database table using `supabase_schema.sql`.
 Supabase Storage should have a bucket named `tradetest-reports`.
-

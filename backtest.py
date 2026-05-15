@@ -1,6 +1,7 @@
 ﻿import math
 import os
 import sys
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
@@ -86,6 +87,115 @@ def load_config(config_path: Path) -> dict:
             raise ValueError(f"Missing config section: {key}")
 
     return cfg
+
+
+def parse_market(cfg: dict) -> str:
+    market = str(cfg.get("data", {}).get("market", "western")).strip().lower()
+    aliases = {
+        "western": "western",
+        "global": "western",
+        "us_eu": "western",
+        "us": "western",
+        "europe": "western",
+        "china": "china",
+        "cn": "china",
+        "a_share": "china",
+        "a-share": "china",
+    }
+    if market not in aliases:
+        raise ValueError("data.market must be one of: western, china")
+    return aliases[market]
+
+
+def currency_for_market(market: str) -> str:
+    return "CNY" if market == "china" else "MARKET_NATIVE"
+
+
+def normalize_symbol_for_market(symbol: str, market: str) -> str:
+    if isinstance(symbol, int):
+        s = f"{symbol:06d}"
+    else:
+        s = str(symbol).strip().upper()
+    if not s:
+        raise ValueError("Empty ticker symbol")
+
+    if market == "china":
+        if s.endswith(".SH"):
+            s = s[:-3] + ".SS"
+        elif s.endswith(".SSE"):
+            s = s[:-4] + ".SS"
+        elif s.endswith(".SZSE"):
+            s = s[:-5] + ".SZ"
+
+        if s.endswith((".SS", ".SZ")):
+            return s
+
+        if s.isdigit() and len(s) == 6:
+            suffix = ".SS" if s.startswith(("5", "6", "9")) else ".SZ"
+            return f"{s}{suffix}"
+
+        raise ValueError(f"China market supports A-share tickers only, such as 600519, 600519.SS, 000001, or 000001.SZ: {symbol}")
+
+    if s.endswith((".SS", ".SZ", ".SH", ".SSE", ".SZSE")) or (s.isdigit() and len(s) == 6):
+        raise ValueError(f"Chinese ticker detected while data.market is western: {symbol}")
+    return s
+
+
+def prepare_config(cfg: dict) -> dict:
+    prepared = deepcopy(cfg)
+    market = parse_market(prepared)
+    data_cfg = prepared.setdefault("data", {})
+    data_cfg["market"] = market
+    prepared.setdefault("account", {})["currency"] = currency_for_market(market)
+
+    symbol_map: dict[str, str] = {}
+    symbols = data_cfg.get("symbols")
+    symbol = data_cfg.get("symbol")
+
+    def remember_symbol(raw: object, normalized: str) -> None:
+        raw_key = str(raw).strip()
+        symbol_map[raw_key] = normalized
+        symbol_map[raw_key.upper()] = normalized
+        symbol_map[normalized] = normalized
+
+    if isinstance(symbols, dict):
+        normalized_symbols = {}
+        for raw, name in symbols.items():
+            normalized = normalize_symbol_for_market(raw, market)
+            remember_symbol(raw, normalized)
+            normalized_symbols[normalized] = str(name)
+        data_cfg["symbols"] = normalized_symbols
+        data_cfg.pop("symbol", None)
+    elif isinstance(symbols, list):
+        normalized_list = []
+        for raw in symbols:
+            normalized = normalize_symbol_for_market(raw, market)
+            remember_symbol(raw, normalized)
+            normalized_list.append(normalized)
+        data_cfg["symbols"] = normalized_list
+        data_cfg.pop("symbol", None)
+    elif isinstance(symbols, str) and symbols.strip():
+        normalized = normalize_symbol_for_market(symbols, market)
+        remember_symbol(symbols, normalized)
+        data_cfg["symbol"] = normalized
+        data_cfg.pop("symbols", None)
+    elif symbol is not None and str(symbol).strip():
+        normalized = normalize_symbol_for_market(symbol, market)
+        remember_symbol(symbol, normalized)
+        data_cfg["symbol"] = normalized
+
+    strategy_cfg = prepared.get("strategy", {})
+    for weight_key in ["target_weights", "max_weights", "min_weights"]:
+        weights = strategy_cfg.get(weight_key)
+        if isinstance(weights, dict):
+            normalized_weights = {}
+            for raw, value in weights.items():
+                raw_key = str(raw).strip()
+                normalized = symbol_map.get(raw_key) or symbol_map.get(raw_key.upper()) or normalize_symbol_for_market(raw, market)
+                normalized_weights[normalized] = value
+            strategy_cfg[weight_key] = normalized_weights
+
+    return prepared
 
 
 def parse_symbols(cfg: dict) -> tuple[list[str], dict[str, str]]:
@@ -414,7 +524,9 @@ def save_outputs(result_dir: Path, equity_df: pd.DataFrame, trades_df: pd.DataFr
 
 def main() -> None:
     config_path = select_config_file(PROJECT_ROOT)
-    cfg = load_config(config_path)
+    cfg = prepare_config(load_config(config_path))
+    market = parse_market(cfg)
+    currency = cfg.get("account", {}).get("currency", currency_for_market(market))
 
     try:
         symbols, symbol_names = parse_symbols(cfg)
@@ -461,6 +573,8 @@ def main() -> None:
 
     summary = {
         "config_file": str(config_path),
+        "market": market,
+        "currency": currency,
         "strategy_type": strategy_type,
         "execution_timing": execution_timing,
         "rebalance_frequency": rebalance_frequency if strategy_type == "monthly_rebalance" else "",
