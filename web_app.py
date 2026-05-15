@@ -2,6 +2,7 @@ import hashlib
 import os
 import shutil
 import tempfile
+from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
@@ -497,6 +498,124 @@ def label_for(lang: str, value: str) -> str:
     return OPTION_LABELS[lang].get(str(value), str(value))
 
 
+def web_parse_market(cfg: dict) -> str:
+    if hasattr(backtest, "parse_market"):
+        return backtest.parse_market(cfg)
+
+    market = str(cfg.get("data", {}).get("market", "western")).strip().lower()
+    aliases = {
+        "western": "western",
+        "global": "western",
+        "us_eu": "western",
+        "us": "western",
+        "europe": "western",
+        "china": "china",
+        "cn": "china",
+        "a_share": "china",
+        "a-share": "china",
+    }
+    if market not in aliases:
+        raise ValueError("data.market must be one of: western, china")
+    return aliases[market]
+
+
+def web_currency_for_market(market: str) -> str:
+    if hasattr(backtest, "currency_for_market"):
+        return backtest.currency_for_market(market)
+    return "CNY" if market == "china" else "MARKET_NATIVE"
+
+
+def web_normalize_symbol_for_market(symbol: object, market: str) -> str:
+    if hasattr(backtest, "normalize_symbol_for_market"):
+        return backtest.normalize_symbol_for_market(symbol, market)
+
+    if isinstance(symbol, int):
+        s = f"{symbol:06d}"
+    else:
+        s = str(symbol).strip().upper()
+    if not s:
+        raise ValueError("Empty ticker symbol")
+
+    if market == "china":
+        if s.endswith(".SH"):
+            s = s[:-3] + ".SS"
+        elif s.endswith(".SSE"):
+            s = s[:-4] + ".SS"
+        elif s.endswith(".SZSE"):
+            s = s[:-5] + ".SZ"
+
+        if s.endswith((".SS", ".SZ")):
+            return s
+        if s.isdigit() and len(s) == 6:
+            suffix = ".SS" if s.startswith(("5", "6", "9")) else ".SZ"
+            return f"{s}{suffix}"
+        raise ValueError(f"China market supports A-share tickers only, such as 600519, 600519.SS, 000001, or 000001.SZ: {symbol}")
+
+    if s.endswith((".SS", ".SZ", ".SH", ".SSE", ".SZSE")) or (s.isdigit() and len(s) == 6):
+        raise ValueError(f"Chinese ticker detected while data.market is western: {symbol}")
+    return s
+
+
+def web_prepare_config(cfg: dict) -> dict:
+    if hasattr(backtest, "prepare_config"):
+        return backtest.prepare_config(cfg)
+
+    prepared = deepcopy(cfg)
+    market = web_parse_market(prepared)
+    data_cfg = prepared.setdefault("data", {})
+    data_cfg["market"] = market
+    prepared.setdefault("account", {})["currency"] = web_currency_for_market(market)
+
+    symbol_map: dict[str, str] = {}
+    symbols = data_cfg.get("symbols")
+    symbol = data_cfg.get("symbol")
+
+    def remember_symbol(raw: object, normalized: str) -> None:
+        raw_key = str(raw).strip()
+        symbol_map[raw_key] = normalized
+        symbol_map[raw_key.upper()] = normalized
+        symbol_map[normalized] = normalized
+
+    if isinstance(symbols, dict):
+        normalized_symbols = {}
+        for raw, name in symbols.items():
+            normalized = web_normalize_symbol_for_market(raw, market)
+            remember_symbol(raw, normalized)
+            normalized_symbols[normalized] = str(name)
+        data_cfg["symbols"] = normalized_symbols
+        data_cfg.pop("symbol", None)
+    elif isinstance(symbols, list):
+        normalized_list = []
+        for raw in symbols:
+            normalized = web_normalize_symbol_for_market(raw, market)
+            remember_symbol(raw, normalized)
+            normalized_list.append(normalized)
+        data_cfg["symbols"] = normalized_list
+        data_cfg.pop("symbol", None)
+    elif isinstance(symbols, str) and symbols.strip():
+        normalized = web_normalize_symbol_for_market(symbols, market)
+        remember_symbol(symbols, normalized)
+        data_cfg["symbol"] = normalized
+        data_cfg.pop("symbols", None)
+    elif symbol is not None and str(symbol).strip():
+        normalized = web_normalize_symbol_for_market(symbol, market)
+        remember_symbol(symbol, normalized)
+        data_cfg["symbol"] = normalized
+
+    strategy_cfg = prepared.get("strategy", {})
+    for weight_key in ["target_weights", "max_weights", "min_weights"]:
+        weights = strategy_cfg.get(weight_key)
+        if isinstance(weights, dict):
+            normalized_weights = {}
+            for raw, value in weights.items():
+                raw_key = str(raw).strip()
+                normalized = symbol_map.get(raw_key) or symbol_map.get(raw_key.upper()) or web_normalize_symbol_for_market(raw, market)
+                normalized_weights[normalized] = value
+            strategy_cfg[weight_key] = normalized_weights
+
+    return prepared
+
+
 def localize_summary_values(df: pd.DataFrame, lang: str) -> pd.DataFrame:
     output = df.copy()
     for col in ["market", "strategy_type", "execution_timing", "rebalance_frequency"]:
@@ -584,10 +703,10 @@ def writable_temp_parent() -> Path:
 
 
 def run_backtest_from_cfg(cfg: dict, config_text_raw: str, lang: str):
-    cfg = backtest.prepare_config(cfg)
+    cfg = web_prepare_config(cfg)
     config_text_raw = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
-    market = backtest.parse_market(cfg)
-    currency = cfg.get("account", {}).get("currency", backtest.currency_for_market(market))
+    market = web_parse_market(cfg)
+    currency = cfg.get("account", {}).get("currency", web_currency_for_market(market))
     symbols, symbol_names = backtest.parse_symbols(cfg)
     start = cfg["data"]["start"]
     end = cfg["data"].get("end")
@@ -708,7 +827,7 @@ def build_cfg_from_wizard(
     if not symbols:
         raise ValueError(tr(lang, "invalid_tickers"))
 
-    currency = backtest.currency_for_market(market)
+    currency = web_currency_for_market(market)
     data_part = {"market": market, "start": str(start), "end": str(end) if end else None}
     if len(symbols) == 1:
         data_part["symbol"] = symbols[0]
@@ -780,7 +899,7 @@ with main_tab:
             format_func=lambda value: label_for(lang, value),
             key="market_selector",
         )
-        currency = backtest.currency_for_market(market)
+        currency = web_currency_for_market(market)
         st.info(tr(lang, "currency_notice").format(currency=currency))
 
         with st.form("wizard_form"):
@@ -848,7 +967,7 @@ with main_tab:
                     cash_buffer,
                     lang,
                 )
-                cfg = backtest.prepare_config(cfg)
+                cfg = web_prepare_config(cfg)
                 cfg_text = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
                 st.code(cfg_text, language="yaml")
                 summary, portfolio_df, trades_df, report_bytes, chart_bytes = run_backtest_from_cfg(cfg, cfg_text, lang)
@@ -914,7 +1033,7 @@ with main_tab:
 
         if st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key=f"run_upload_{lang}"):
             try:
-                cfg = backtest.prepare_config(yaml.safe_load(config_text))
+                cfg = web_prepare_config(yaml.safe_load(config_text))
                 prepared_config_text = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
                 summary, portfolio_df, trades_df, report_bytes, chart_bytes = run_backtest_from_cfg(cfg, prepared_config_text, lang)
                 saved = cloud.save_run(
