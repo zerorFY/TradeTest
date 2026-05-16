@@ -1,5 +1,8 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
 
 import hashlib
+import html
 import os
 import shutil
 import tempfile
@@ -18,6 +21,7 @@ from cloud_store import CloudStore, default_terminal_id
 
 
 APP_NAME = "TradeTest"
+
 
 STANDARD_MA_TEMPLATE = yaml_builder.config_to_yaml(
     yaml_builder.build_moving_average_config(
@@ -82,115 +86,230 @@ report:
   output_dir: "results"
 """
 
+
 TEXT = {
     "zh": {
         "app_subtitle": "Daily Stock & ETF Backtesting Engine",
-        "language": "Language / ??",
-        "new_backtest": "????",
-        "cloud_history": "????",
-        "docs": "??",
-        "cloud": "??",
-        "terminal_id": "?? ID",
-        "config_name": "????",
-        "cloud_enabled": "???????",
-        "cloud_disabled": "?? SUPABASE_URL ? SUPABASE_KEY ????????",
-        "data_settings": "????",
-        "input_method": "????",
-        "strategy_settings": "????",
-        "yaml_preview": "YAML ?? / ????",
-        "run_backtest": "???? (Run Backtest)",
-        "results": "????",
-        "manual_strategy": "????",
-        "upload_yaml": "?? YAML",
-        "market": "??",
-        "western": "????",
-        "china": "?? A ?",
-        "symbol": "?? Symbol",
-        "start": "????",
-        "end": "????",
-        "initial_cash": "????",
-        "execution_price": "????",
-        "commission_pct": "????",
-        "slippage_pct": "??",
-        "strategy_type": "????",
-        "ma_cross": "????",
-        "rsi_reversal": "RSI ??",
-        "short_window": "???",
-        "long_window": "???",
-        "rsi_window": "RSI ??",
-        "entry_threshold": "????",
-        "exit_threshold": "????",
-        "coming_next": "Breakout / Bollinger Band ????????",
-        "copy_yaml": "?? YAML",
-        "edit_yaml": "?? YAML",
-        "upload_config": "?? YAML ??",
-        "yaml_tip": "???????? YAML??? YAML ?????? parser ? engine?",
-        "run_failed": "????",
-        "saved_to_cloud": "??????",
-        "export_report": "?? Excel ??",
-        "total_return": "????",
-        "annual_return": "?????",
-        "max_drawdown": "????",
-        "sharpe_ratio": "????",
-        "win_rate": "??",
-        "trade_count": "????",
-        "profit_factor": "???",
-        "buy_hold_return": "??????",
-        "equity_curve": "????",
-        "drawdown_curve": "????",
-        "recent_trades": "??????",
-        "history_intro": "???????????YAML???? Excel ???",
-        "history_disabled": "????????",
-        "no_runs": "???????????",
-        "open_run": "????",
-        "open_report": "?? Excel ??",
-        "risk": "????????????????????????????????????????",
+        "language": "Language / 语言",
+        "docs": "文档",
+        "theme": "主题",
+        "alerts": "通知",
+        "help": "帮助",
+        "overview": "总览",
+        "research": "回测研究",
+        "new_backtest": "新建回测",
+        "backtest_list": "回测列表",
+        "strategy_library": "策略库",
+        "data_manage": "数据管理",
+        "analysis_tools": "分析工具",
+        "return_analysis": "收益分析",
+        "factor_analysis": "因子分析",
+        "portfolio_analysis": "组合分析",
+        "mine": "我的",
+        "favorite_strategy": "收藏策略",
+        "reports": "回测报告",
+        "settings": "设置",
+        "data_source": "数据源",
+        "cloud": "云端",
+        "cloud_history": "云端历史",
+        "terminal_id": "终端 ID",
+        "config_name": "配置名称",
+        "cloud_enabled": "云端同步 已开启",
+        "cloud_disabled": "云端同步 未开启",
+        "cloud_disabled_help": "设置 SUPABASE_URL 和 SUPABASE_KEY 后可保存历史记录。",
+        "connected": "已连接",
+        "not_connected": "未连接",
+        "step_1": "数据设置",
+        "step_1_sub": "选择标的与回测区间",
+        "step_2": "输入方式",
+        "step_2_sub": "选择手动或上传 YAML",
+        "step_3": "策略设置",
+        "step_3_sub": "配置交易策略参数",
+        "step_4": "YAML 预览",
+        "step_4_sub": "查看与编辑配置",
+        "step_5": "运行回测",
+        "step_5_sub": "执行回测并生成结果",
+        "step_6": "回测结果",
+        "step_6_sub": "查看绩效与交易明细",
+        "data_settings": "数据设置",
+        "manual_strategy": "手动策略",
+        "yaml_preview": "YAML 预览 / 高级编辑",
+        "results": "回测结果",
+        "input_source": "配置来源",
+        "form_config": "表单配置",
+        "upload_yaml": "上传 YAML",
+        "market": "市场",
+        "western": "欧美股市",
+        "china": "中国 A 股",
+        "symbol": "标的 Symbol",
+        "symbol_help": "欧美示例 AAPL / VFV.TO；中国示例 510300 / 600519",
+        "start": "开始日期",
+        "end": "结束日期",
+        "initial_cash": "初始资金",
+        "currency": "币种",
+        "execution_price": "执行价格",
+        "commission_pct": "手续费率",
+        "slippage_pct": "滑点",
+        "more_data_options": "更多数据选项",
+        "strategy_type": "策略类型",
+        "ma_cross": "均线交叉",
+        "rsi_reversal": "RSI 反转",
+        "ma_desc": "短期均线上穿长期均线买入，下穿长期均线卖出。",
+        "rsi_desc": "RSI 进入超卖区买入，恢复到卖出阈值后退出。",
+        "coming_next": "Breakout 与 Bollinger Band 下一版接入，目前先不开放运行，避免误用。",
+        "basic_params": "基础参数",
+        "strategy_params": "策略参数",
+        "risk_cost": "风险 / 成本设置",
+        "frequency": "回测频率",
+        "daily": "日线",
+        "signal_delay": "信号延迟",
+        "signal_direction": "信号方向",
+        "long_only": "多头",
+        "price_field": "价格字段",
+        "short_window": "短均线",
+        "long_window": "长均线",
+        "rsi_window": "RSI 周期",
+        "entry_threshold": "买入阈值",
+        "exit_threshold": "卖出阈值",
+        "position_mode": "仓位管理",
+        "full_position": "满仓 / 空仓",
+        "position_pct": "每次仓位",
+        "stop_loss": "止损方式",
+        "none": "暂不启用",
+        "run_backtest": "运行回测 (Run Backtest)",
+        "copy_yaml": "下载 YAML",
+        "edit_yaml": "编辑 YAML",
+        "upload_config": "上传 YAML 配置",
+        "ma_template": "下载均线模板",
+        "rsi_template": "下载 RSI 模板",
+        "legacy_template": "下载组合模板",
+        "yaml_tip": "手动表单会先生成 YAML；上传 YAML 也走同一个 parser 和 engine。",
+        "run_failed": "回测失败",
+        "saved_to_cloud": "已保存到云端",
+        "export_report": "导出报告",
+        "total_return": "总收益率",
+        "annual_return": "年化收益率",
+        "max_drawdown": "最大回撤",
+        "sharpe_ratio": "夏普比率",
+        "win_rate": "胜率",
+        "trade_count": "交易次数",
+        "profit_factor": "盈亏比",
+        "buy_hold_return": "买入持有收益率",
+        "benchmark": "基准",
+        "cost_adjusted": "扣成本后",
+        "equity_curve": "收益曲线",
+        "drawdown_curve": "回撤曲线",
+        "recent_trades": "最近交易记录",
+        "view_all": "查看全部",
+        "waiting_result": "运行一次回测后，这里会显示收益曲线、回撤曲线和交易明细。",
+        "history_intro": "云端历史会保存回测摘要、YAML 配置、图表和 Excel 报告。",
+        "history_disabled": "云端历史当前不可用。",
+        "no_runs": "还没有保存的回测记录。",
+        "open_run": "打开记录",
+        "open_report": "打开 Excel 报告",
+        "risk": "免责声明：本平台提供的所有信息仅供参考，不构成任何投资建议。投资有风险，入市需谨慎。",
+        "footer_source": "数据来源",
+        "footer_update": "更新时间",
     },
     "en": {
         "app_subtitle": "Daily Stock & ETF Backtesting Engine",
-        "language": "Language / ??",
-        "new_backtest": "New Backtest",
-        "cloud_history": "Cloud History",
+        "language": "Language / 语言",
         "docs": "Docs",
+        "theme": "Theme",
+        "alerts": "Alerts",
+        "help": "Help",
+        "overview": "Overview",
+        "research": "Backtest Research",
+        "new_backtest": "New Backtest",
+        "backtest_list": "Backtest List",
+        "strategy_library": "Strategy Library",
+        "data_manage": "Data Management",
+        "analysis_tools": "Analysis Tools",
+        "return_analysis": "Return Analysis",
+        "factor_analysis": "Factor Analysis",
+        "portfolio_analysis": "Portfolio Analysis",
+        "mine": "Mine",
+        "favorite_strategy": "Favorite Strategies",
+        "reports": "Backtest Reports",
+        "settings": "Settings",
+        "data_source": "Data Source",
         "cloud": "Cloud",
+        "cloud_history": "Cloud History",
         "terminal_id": "Terminal ID",
         "config_name": "Config Name",
         "cloud_enabled": "Cloud sync enabled",
-        "cloud_disabled": "Set SUPABASE_URL and SUPABASE_KEY to enable cloud sync",
+        "cloud_disabled": "Cloud sync disabled",
+        "cloud_disabled_help": "Set SUPABASE_URL and SUPABASE_KEY to save history.",
+        "connected": "Connected",
+        "not_connected": "Not connected",
+        "step_1": "Data Settings",
+        "step_1_sub": "Choose symbol and date range",
+        "step_2": "Input Method",
+        "step_2_sub": "Manual form or YAML upload",
+        "step_3": "Strategy Settings",
+        "step_3_sub": "Configure strategy parameters",
+        "step_4": "YAML Preview",
+        "step_4_sub": "Review and edit config",
+        "step_5": "Run Backtest",
+        "step_5_sub": "Run and generate results",
+        "step_6": "Backtest Results",
+        "step_6_sub": "Review performance and trades",
         "data_settings": "Data Settings",
-        "input_method": "Input Method",
-        "strategy_settings": "Strategy Settings",
-        "yaml_preview": "YAML Preview / Advanced Edit",
-        "run_backtest": "Run Backtest",
-        "results": "Backtest Results",
         "manual_strategy": "Manual Strategy",
+        "yaml_preview": "YAML Preview / Advanced Edit",
+        "results": "Backtest Results",
+        "input_source": "Config Source",
+        "form_config": "Form Config",
         "upload_yaml": "Upload YAML",
         "market": "Market",
         "western": "Western Market",
         "china": "China A-share",
         "symbol": "Symbol",
+        "symbol_help": "Western examples: AAPL / VFV.TO; China examples: 510300 / 600519",
         "start": "Start Date",
         "end": "End Date",
         "initial_cash": "Initial Cash",
+        "currency": "Currency",
         "execution_price": "Execution Price",
         "commission_pct": "Commission Rate",
         "slippage_pct": "Slippage",
+        "more_data_options": "More Data Options",
         "strategy_type": "Strategy Type",
         "ma_cross": "Moving Average Cross",
         "rsi_reversal": "RSI Reversal",
-        "short_window": "Short Window",
-        "long_window": "Long Window",
+        "ma_desc": "Buy when short MA crosses above long MA; sell when it crosses below.",
+        "rsi_desc": "Buy when RSI reaches oversold area; exit when RSI recovers to the exit threshold.",
+        "coming_next": "Breakout and Bollinger Band will be added next. They are not runnable yet to avoid misuse.",
+        "basic_params": "Basic Parameters",
+        "strategy_params": "Strategy Parameters",
+        "risk_cost": "Risk / Cost Settings",
+        "frequency": "Frequency",
+        "daily": "Daily",
+        "signal_delay": "Signal Delay",
+        "signal_direction": "Signal Direction",
+        "long_only": "Long Only",
+        "price_field": "Price Field",
+        "short_window": "Short MA",
+        "long_window": "Long MA",
         "rsi_window": "RSI Window",
         "entry_threshold": "Entry Threshold",
         "exit_threshold": "Exit Threshold",
-        "coming_next": "Breakout / Bollinger Band will be supported in the next release.",
+        "position_mode": "Position Mode",
+        "full_position": "Full / Flat",
+        "position_pct": "Position Size",
+        "stop_loss": "Stop Loss",
+        "none": "Disabled",
+        "run_backtest": "Run Backtest",
         "copy_yaml": "Download YAML",
         "edit_yaml": "Edit YAML",
         "upload_config": "Upload YAML Config",
-        "yaml_tip": "Manual strategy generates YAML first; uploaded YAML uses the same parser and engine.",
+        "ma_template": "Download MA Template",
+        "rsi_template": "Download RSI Template",
+        "legacy_template": "Download Portfolio Template",
+        "yaml_tip": "Manual form generates YAML first; uploaded YAML uses the same parser and engine.",
         "run_failed": "Run failed",
         "saved_to_cloud": "Saved to cloud",
-        "export_report": "Export Excel Report",
+        "export_report": "Export Report",
         "total_return": "Total Return",
         "annual_return": "Annual Return",
         "max_drawdown": "Max Drawdown",
@@ -199,15 +318,21 @@ TEXT = {
         "trade_count": "Trade Count",
         "profit_factor": "Profit Factor",
         "buy_hold_return": "Buy & Hold Return",
+        "benchmark": "Benchmark",
+        "cost_adjusted": "Cost adjusted",
         "equity_curve": "Equity Curve",
         "drawdown_curve": "Drawdown Curve",
         "recent_trades": "Recent Trades",
-        "history_intro": "Cloud history stores backtest summaries, YAML configs, charts, and Excel reports.",
+        "view_all": "View All",
+        "waiting_result": "Run a backtest to show equity curve, drawdown curve, and trades here.",
+        "history_intro": "Cloud history stores summaries, YAML configs, charts, and Excel reports.",
         "history_disabled": "Cloud history is disabled.",
         "no_runs": "No saved runs yet.",
         "open_run": "Open Run",
         "open_report": "Open Excel Report",
         "risk": "Disclaimer: Information is for research only and is not investment advice. Investing involves risk.",
+        "footer_source": "Data Source",
+        "footer_update": "Updated At",
     },
 }
 
@@ -223,18 +348,38 @@ def get_streamlit_secrets() -> dict:
         return {}
 
 
-def fmt_pct(value: float | int | None) -> str:
+def fmt_pct(value: float | int | None, signed: bool = True) -> str:
     if value is None or pd.isna(value):
         return "--"
-    return f"{float(value):+.2%}"
+    sign = "+" if signed else ""
+    return f"{float(value):{sign}.2%}"
 
 
 def fmt_num(value: float | int | None) -> str:
     if value is None or pd.isna(value):
         return "--"
     if value == float("inf"):
-        return "?"
+        return "∞"
     return f"{float(value):,.2f}"
+
+
+def fmt_money(value: float | int | None, currency: str) -> str:
+    if value is None or pd.isna(value):
+        return "--"
+    prefix = "¥" if currency == "CNY" else "$"
+    return f"{prefix}{float(value):,.0f}"
+
+
+def currency_for_market_ui(market: str) -> str:
+    return "CNY" if market == "china" else "MARKET_NATIVE"
+
+
+def symbol_display_name(symbol: str, market: str) -> str:
+    if market == "china":
+        names = {"510300": "沪深300 ETF", "510300.SS": "沪深300 ETF", "600519": "贵州茅台", "600519.SS": "贵州茅台"}
+        return names.get(symbol.strip().upper(), "中国 A 股 / ETF")
+    names = {"AAPL": "Apple Inc.", "VFV.TO": "Vanguard S&P 500 ETF", "QQC.TO": "NASDAQ 100 ETF"}
+    return names.get(symbol.strip().upper(), "Stock / ETF")
 
 
 def writable_temp_parent() -> Path:
@@ -279,18 +424,22 @@ def run_legacy_backtest(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame, dict, di
     open_prices, close_prices = backtest.download_prices(symbols, start, end)
 
     if strategy_type == "monthly_rebalance":
-        portfolio_df, trades_df = backtest.run_periodic_rebalance(open_prices, close_prices, initial_cash, commission, slippage, strategy_cfg, execution_timing)
+        portfolio_df, trades_df = backtest.run_periodic_rebalance(
+            open_prices, close_prices, initial_cash, commission, slippage, strategy_cfg, execution_timing
+        )
     else:
         fast_ma = int(strategy_cfg.get("fast_ma", 20))
         slow_ma = int(strategy_cfg.get("slow_ma", 60))
-        portfolio_df, trades_df = backtest.run_ma_portfolio(open_prices, close_prices, initial_cash, commission, slippage, fast_ma, slow_ma, execution_timing)
+        portfolio_df, trades_df = backtest.run_ma_portfolio(
+            open_prices, close_prices, initial_cash, commission, slippage, fast_ma, slow_ma, execution_timing
+        )
 
     final_equity = float(portfolio_df["equity"].iloc[-1])
     total_return = final_equity / initial_cash - 1.0
     portfolio_df["drawdown"] = portfolio_df["equity"] / portfolio_df["equity"].cummax() - 1.0
     bh_returns = [float(close_prices[s].iloc[-1] / close_prices[s].iloc[0] - 1.0) for s in symbols]
     daily_returns = portfolio_df["equity"].pct_change().dropna()
-    sharpe = float(daily_returns.mean() / daily_returns.std() * (252 ** 0.5)) if len(daily_returns) > 1 and daily_returns.std() > 0 else 0.0
+    sharpe = float(daily_returns.mean() / daily_returns.std() * (252**0.5)) if len(daily_returns) > 1 and daily_returns.std() > 0 else 0.0
     days = max(1, int((pd.to_datetime(portfolio_df["Date"].iloc[-1]) - pd.to_datetime(portfolio_df["Date"].iloc[0])).days))
     annual_return = (1 + total_return) ** (365.25 / days) - 1 if total_return > -1 else -1.0
     summary = {
@@ -348,11 +497,27 @@ def run_yaml_backtest(config_text: str) -> tuple[dict, pd.DataFrame, pd.DataFram
     return summary, portfolio_df, trades_df, report_bytes, chart_bytes, prepared_yaml
 
 
-def save_cloud_run_safely(cloud: CloudStore, terminal_id: str, config_name: str, config_yaml: str, summary: dict, report_bytes: bytes, chart_bytes: bytes | None, lang: str) -> None:
+def save_cloud_run_safely(
+    cloud: CloudStore,
+    terminal_id: str,
+    config_name: str,
+    config_yaml: str,
+    summary: dict,
+    report_bytes: bytes,
+    chart_bytes: bytes | None,
+    lang: str,
+) -> None:
     if not cloud.enabled:
         return
     try:
-        saved = cloud.save_run(terminal_id=terminal_id, config_name=config_name, config_yaml=config_yaml, summary=summary, report_bytes=report_bytes, chart_bytes=chart_bytes)
+        saved = cloud.save_run(
+            terminal_id=terminal_id,
+            config_name=config_name,
+            config_yaml=config_yaml,
+            summary=summary,
+            report_bytes=report_bytes,
+            chart_bytes=chart_bytes,
+        )
         if saved:
             st.toast(tr(lang, "saved_to_cloud"))
     except Exception as exc:
@@ -376,9 +541,13 @@ def build_manual_yaml(
     exit_threshold: float,
 ) -> str:
     if strategy_type == "moving_average_cross":
-        cfg = yaml_builder.build_moving_average_config(market, symbol, start, end or None, initial_cash, execution_price, commission_pct, slippage_pct, short_window, long_window)
+        cfg = yaml_builder.build_moving_average_config(
+            market, symbol, start, end or None, initial_cash, execution_price, commission_pct, slippage_pct, short_window, long_window
+        )
     elif strategy_type == "rsi_reversal":
-        cfg = yaml_builder.build_rsi_reversal_config(market, symbol, start, end or None, initial_cash, execution_price, commission_pct, slippage_pct, rsi_window, entry_threshold, exit_threshold)
+        cfg = yaml_builder.build_rsi_reversal_config(
+            market, symbol, start, end or None, initial_cash, execution_price, commission_pct, slippage_pct, rsi_window, entry_threshold, exit_threshold
+        )
     else:
         raise ValueError("Only Moving Average Cross and RSI Reversal are supported in V2 first release.")
     return yaml_builder.config_to_yaml(cfg)
@@ -388,30 +557,317 @@ def inject_css() -> None:
     st.markdown(
         """
 <style>
-:root { --navy:#061727; --panel:#ffffff; --muted:#64748b; --line:#d8e1ec; --teal:#00a99d; --teal2:#18c4b5; --danger:#dc2626; }
-.stApp { background: linear-gradient(180deg, #f5f8fc 0%, #eef4f8 100%); color:#0f172a; }
-[data-testid="stSidebar"] { background: linear-gradient(180deg, #061727 0%, #08243c 100%); }
-[data-testid="stSidebar"] * { color:#e5edf7 !important; }
-.block-container { padding-top: 0.85rem; max-width: 1800px; }
-.trade-header { background:linear-gradient(90deg,#061727,#08213a); color:white; padding:16px 22px; border-radius:0 0 18px 18px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 10px 28px rgba(6,23,39,.18); }
-.brand { font-size:24px; font-weight:800; letter-spacing:-.02em; }
-.subtitle { color:#b6c7d8; font-size:13px; margin-left:12px; }
-.card { background:white; border:1px solid #d9e3ee; border-radius:12px; padding:16px; box-shadow:0 8px 22px rgba(15,23,42,.05); }
-.card h3 { margin:0 0 14px 0; font-size:16px; }
-.stepbar { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin:8px 0 16px; }
-.step { background:#fff; border:1px solid #d9e3ee; border-radius:999px; padding:9px 12px; font-size:13px; color:#475569; display:flex; align-items:center; gap:8px; }
-.step b { background:#cbd5e1; color:#0f172a; border-radius:999px; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; }
-.step.active b { background:linear-gradient(135deg,#00a99d,#1dd3c3); color:white; }
-.metric-grid { display:grid; grid-template-columns:repeat(8,1fr); gap:10px; }
-.metric-card { background:#fff; border:1px solid #d9e3ee; border-radius:12px; padding:13px; }
-.metric-label { color:#64748b; font-size:12px; }
-.metric-value { color:#0f766e; font-size:22px; font-weight:800; margin-top:6px; }
-.metric-value.negative { color:#dc2626; }
-.footer-note { color:#94a3b8; font-size:12px; text-align:center; padding:10px; }
-.stButton > button[kind="primary"] { background:linear-gradient(135deg,#00a99d,#12c8b6) !important; border:0 !important; color:white !important; font-weight:800 !important; border-radius:10px !important; box-shadow:0 10px 22px rgba(0,169,157,.28); }
-.stButton > button[kind="secondary"] { border-color:#b7c7d8 !important; color:#0f172a !important; border-radius:10px !important; }
-pre { border-radius:10px !important; }
-@media (max-width: 1100px) { .stepbar { grid-template-columns:repeat(2,1fr); } .metric-grid { grid-template-columns:repeat(2,1fr); } }
+:root {
+  --navy: #061727;
+  --navy-2: #08243d;
+  --cyan: #00a99d;
+  --cyan-2: #18c4b5;
+  --muted: #64748b;
+  --line: #d9e3ee;
+  --panel: #ffffff;
+  --soft: #f5f8fc;
+}
+.stApp {
+  background: linear-gradient(180deg, #f5f8fc 0%, #eef4f8 100%);
+  color: #0f172a;
+}
+.block-container {
+  max-width: 1880px;
+  padding: 0.8rem 1rem 0.3rem 1rem;
+}
+[data-testid="stSidebar"] {
+  background: radial-gradient(circle at 20% 0%, rgba(0,169,157,.20), transparent 26%), linear-gradient(180deg, #061727 0%, #08213a 52%, #061727 100%);
+  border-right: 1px solid rgba(255,255,255,.08);
+}
+[data-testid="stSidebar"] * {
+  color: #d9e7f4 !important;
+}
+[data-testid="stSidebar"] input,
+[data-testid="stSidebar"] textarea,
+[data-testid="stSidebar"] select,
+[data-testid="stSidebar"] [data-baseweb="select"] * {
+  color: #0f172a !important;
+}
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+  margin-bottom: .25rem;
+}
+.top-shell {
+  background: linear-gradient(90deg, #061727 0%, #08233d 100%);
+  color: white;
+  margin: -0.8rem -1rem 0.75rem -1rem;
+  padding: 13px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 12px 30px rgba(6, 23, 39, .22);
+}
+.brand-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.logo-mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #00a99d, #2dd4bf);
+  color: #061727;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 900;
+  letter-spacing: -.08em;
+}
+.brand-title {
+  font-size: 21px;
+  font-weight: 850;
+  letter-spacing: -.03em;
+}
+.brand-subtitle {
+  color: #b7c9dc;
+  font-size: 12px;
+  margin-left: 8px;
+}
+.top-actions {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  color: #d9e7f4;
+  font-size: 13px;
+}
+.circle-user {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #315dcc;
+  color: white;
+  font-weight: 800;
+}
+.side-title {
+  color: #8ea7bf;
+  font-size: 12px;
+  letter-spacing: .08em;
+  margin: 18px 0 8px 0;
+}
+.nav-row {
+  padding: 9px 11px;
+  border-radius: 8px;
+  color: #d9e7f4;
+  margin: 3px 0;
+  font-size: 14px;
+}
+.nav-row.active {
+  background: linear-gradient(90deg, rgba(0,169,157,.22), rgba(0,169,157,.08));
+  color: #2dd4bf;
+  border: 1px solid rgba(45,212,191,.20);
+}
+.source-card {
+  margin-top: 28px;
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 10px;
+  background: rgba(255,255,255,.03);
+}
+.source-card strong {
+  color: white;
+}
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #2dd4bf;
+  margin-right: 7px;
+}
+.stepper {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+  margin: 8px 0 14px 0;
+}
+.step-item {
+  position: relative;
+  background: transparent;
+  min-height: 50px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.step-item:after {
+  content: "";
+  position: absolute;
+  left: 54px;
+  right: 4px;
+  top: 16px;
+  border-top: 1px dashed #9db1c7;
+}
+.step-item:last-child:after {
+  display: none;
+}
+.step-num {
+  z-index: 1;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: #334155;
+  background: linear-gradient(135deg, #edf2f7, #cbd5e1);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.8);
+}
+.step-item.active .step-num {
+  color: white;
+  background: linear-gradient(135deg, #00a99d, #16c7b7);
+  box-shadow: 0 9px 22px rgba(0,169,157,.32);
+}
+.step-text b {
+  display: block;
+  color: #1e293b;
+  font-size: 13px;
+  line-height: 1.15;
+}
+.step-text span {
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  margin-top: 3px;
+}
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px 0;
+  font-weight: 800;
+  color: #1e293b;
+  font-size: 15px;
+}
+.section-num {
+  display: inline-flex;
+  width: 21px;
+  height: 21px;
+  border-radius: 999px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #c8d5e3;
+  color: #334155;
+  background: white;
+  font-size: 12px;
+}
+.param-group {
+  border-left: 3px solid #18c4b5;
+  padding-left: 10px;
+  margin: 10px 0 6px 0;
+  color: #0f766e;
+  font-size: 13px;
+  font-weight: 800;
+}
+[data-testid="stVerticalBlockBorderWrapper"] {
+  border-color: #d9e3ee !important;
+  border-radius: 12px !important;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .05);
+  background: white;
+}
+.stButton > button[kind="primary"] {
+  background: linear-gradient(135deg, #00a99d, #12c8b6) !important;
+  border: 0 !important;
+  color: #fff !important;
+  font-weight: 850 !important;
+  border-radius: 9px !important;
+  box-shadow: 0 10px 22px rgba(0,169,157,.28);
+  min-height: 44px;
+}
+.stButton > button[kind="secondary"],
+.stDownloadButton > button {
+  border-color: #c5d3e2 !important;
+  color: #1e293b !important;
+  border-radius: 8px !important;
+}
+.yaml-panel {
+  background: linear-gradient(180deg, #111827, #0b1220);
+  color: #d6e4f0;
+  border: 1px solid #243244;
+  border-radius: 10px;
+  padding: 12px 0;
+  max-height: 470px;
+  overflow: auto;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+}
+.yaml-line {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 10px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+}
+.yaml-ln {
+  color: #64748b;
+  text-align: right;
+  user-select: none;
+}
+.yaml-code {
+  color: #d8e6f3;
+}
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(120px, 1fr));
+  gap: 9px;
+  margin: 8px 0 10px 0;
+}
+.metric-card {
+  background: white;
+  border: 1px solid #d9e3ee;
+  border-radius: 10px;
+  padding: 11px 12px;
+  box-shadow: 0 6px 16px rgba(15,23,42,.04);
+}
+.metric-label {
+  color: #64748b;
+  font-size: 12px;
+}
+.metric-value {
+  color: #0f766e;
+  font-size: 20px;
+  font-weight: 850;
+  margin-top: 5px;
+}
+.metric-value.negative {
+  color: #dc2626;
+}
+.metric-sub {
+  color: #64748b;
+  font-size: 11px;
+  margin-top: 4px;
+}
+.footer-bar {
+  background: #061727;
+  color: #9fb4c9;
+  margin: 10px -1rem -0.3rem -1rem;
+  padding: 10px 24px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 28px;
+  font-size: 12px;
+}
+.warning-strip {
+  background: #fffbea;
+  color: #9a6700;
+  border-radius: 8px;
+  padding: 11px 13px;
+  margin: 8px 0 13px 0;
+  font-size: 13px;
+}
+@media (max-width: 1200px) {
+  .stepper { grid-template-columns: repeat(2, 1fr); }
+  .metric-grid { grid-template-columns: repeat(2, 1fr); }
+  .footer-bar { grid-template-columns: 1fr; }
+}
 </style>
 """,
         unsafe_allow_html=True,
@@ -421,122 +877,378 @@ pre { border-radius:10px !important; }
 def render_header(lang: str) -> None:
     st.markdown(
         f"""
-<div class="trade-header">
-  <div><span class="brand">TradeTest</span><span class="subtitle">{tr(lang, 'app_subtitle')}</span></div>
-  <div>{tr(lang, 'docs')} ? ? ? ?</div>
+<div class="top-shell">
+  <div class="brand-wrap">
+    <span class="logo-mark">TT</span>
+    <span class="brand-title">TradeTest</span>
+    <span class="brand-subtitle">{html.escape(tr(lang, "app_subtitle"))}</span>
+  </div>
+  <div class="top-actions">
+    <span>{html.escape(tr(lang, "docs"))}</span>
+    <span>{html.escape(tr(lang, "theme"))}</span>
+    <span>{html.escape(tr(lang, "alerts"))}</span>
+    <span>{html.escape(tr(lang, "help"))}</span>
+    <span class="circle-user">U</span>
+  </div>
 </div>
 """,
         unsafe_allow_html=True,
     )
 
 
-def render_steps(lang: str, active: int = 3) -> None:
-    labels = [tr(lang, "data_settings"), tr(lang, "input_method"), tr(lang, "strategy_settings"), tr(lang, "yaml_preview"), tr(lang, "run_backtest"), tr(lang, "results")]
-    html = '<div class="stepbar">'
-    for idx, label in enumerate(labels, start=1):
-        klass = "step active" if idx in {1, active} else "step"
-        html += f'<div class="{klass}"><b>{idx}</b><span>{label}</span></div>'
-    html += "</div>"
-    st.markdown(html, unsafe_allow_html=True)
+def render_steps(lang: str) -> None:
+    html_parts = ['<div class="stepper">']
+    for idx in range(1, 7):
+        active = " active" if idx in {1, 3} else ""
+        html_parts.append(
+            f"""
+<div class="step-item{active}">
+  <span class="step-num">{idx}</span>
+  <span class="step-text"><b>{html.escape(tr(lang, f"step_{idx}"))}</b><span>{html.escape(tr(lang, f"step_{idx}_sub"))}</span></span>
+</div>
+"""
+        )
+    html_parts.append("</div>")
+    st.markdown("".join(html_parts), unsafe_allow_html=True)
+
+
+def render_sidebar(lang: str, cloud: CloudStore) -> tuple[str, str, str, str]:
+    with st.sidebar:
+        lang_label = st.selectbox(TEXT["zh"]["language"], ["中文", "English"], index=0, key="language_selector")
+        chosen_lang = "zh" if lang_label == "中文" else "en"
+        if "page_selector" not in st.session_state:
+            st.session_state["page_selector"] = "new"
+
+        st.markdown(f'<div class="nav-row">{tr(chosen_lang, "overview")}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="side-title">{tr(chosen_lang, "research")}</div>', unsafe_allow_html=True)
+
+        if st.button(tr(chosen_lang, "new_backtest"), use_container_width=True, key="nav_new"):
+            st.session_state["page_selector"] = "new"
+        if st.button(tr(chosen_lang, "backtest_list"), use_container_width=True, key="nav_history"):
+            st.session_state["page_selector"] = "history"
+        page = st.session_state["page_selector"]
+
+        st.markdown(f'<div class="nav-row">{tr(chosen_lang, "strategy_library")}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="nav-row">{tr(chosen_lang, "data_manage")}</div>', unsafe_allow_html=True)
+
+        st.markdown(f'<div class="side-title">{tr(chosen_lang, "analysis_tools")}</div>', unsafe_allow_html=True)
+        for key in ["return_analysis", "factor_analysis", "portfolio_analysis"]:
+            st.markdown(f'<div class="nav-row">{tr(chosen_lang, key)}</div>', unsafe_allow_html=True)
+
+        st.markdown(f'<div class="side-title">{tr(chosen_lang, "mine")}</div>', unsafe_allow_html=True)
+        for key in ["favorite_strategy", "reports", "settings"]:
+            st.markdown(f'<div class="nav-row">{tr(chosen_lang, key)}</div>', unsafe_allow_html=True)
+
+        st.markdown("---")
+        st.markdown(f"### {tr(chosen_lang, 'cloud')}")
+        terminal_id = st.text_input(tr(chosen_lang, "terminal_id"), value=default_terminal_id(), key="terminal_id")
+        config_name = st.text_input(tr(chosen_lang, "config_name"), value="web_config", key="config_name")
+        if cloud.enabled:
+            st.success(tr(chosen_lang, "cloud_enabled"))
+        else:
+            st.info(f"{tr(chosen_lang, 'cloud_disabled')}。{tr(chosen_lang, 'cloud_disabled_help')}")
+
+        source_status = tr(chosen_lang, "connected") if cloud.enabled else tr(chosen_lang, "not_connected")
+        st.markdown(
+            f"""
+<div class="source-card">
+  <div class="side-title">{tr(chosen_lang, "data_source")}</div>
+  <strong>Yahoo Finance / Tushare</strong>
+  <div style="margin-top:10px;"><span class="status-dot"></span>{source_status}</div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    return chosen_lang, page, terminal_id, config_name
+
+
+def section_title(number: int, title: str) -> None:
+    st.markdown(f'<div class="section-title"><span class="section-num">{number}</span>{html.escape(title)}</div>', unsafe_allow_html=True)
+
+
+def param_group(title: str) -> None:
+    st.markdown(f'<div class="param-group">{html.escape(title)}</div>', unsafe_allow_html=True)
+
+
+def render_yaml_code(config_text: str) -> None:
+    lines = config_text.rstrip().splitlines() or [""]
+    html_lines = ['<div class="yaml-panel">']
+    for idx, line in enumerate(lines, start=1):
+        html_lines.append(
+            f'<div class="yaml-line"><span class="yaml-ln">{idx}</span><span class="yaml-code">{html.escape(line)}</span></div>'
+        )
+    html_lines.append("</div>")
+    st.markdown("".join(html_lines), unsafe_allow_html=True)
 
 
 def render_metric_cards(summary: dict, lang: str) -> None:
     items = [
-        ("total_return", fmt_pct(summary.get("total_return"))),
-        ("annual_return", fmt_pct(summary.get("annual_return"))),
-        ("max_drawdown", fmt_pct(summary.get("max_drawdown"))),
-        ("sharpe_ratio", fmt_num(summary.get("sharpe_ratio"))),
-        ("win_rate", fmt_pct(summary.get("win_rate"))),
-        ("trade_count", str(summary.get("trade_count", 0))),
-        ("profit_factor", fmt_num(summary.get("profit_factor"))),
-        ("buy_hold_return", fmt_pct(summary.get("buy_hold_return"))),
+        ("total_return", fmt_pct(summary.get("total_return")), fmt_pct(summary.get("buy_hold_return"))),
+        ("annual_return", fmt_pct(summary.get("annual_return")), "--"),
+        ("max_drawdown", fmt_pct(summary.get("max_drawdown")), "--"),
+        ("sharpe_ratio", fmt_num(summary.get("sharpe_ratio")), "--"),
+        ("win_rate", fmt_pct(summary.get("win_rate"), signed=False), "--"),
+        ("trade_count", str(summary.get("trade_count", 0)), "--"),
+        ("profit_factor", fmt_num(summary.get("profit_factor")), "--"),
+        ("buy_hold_return", fmt_pct(summary.get("buy_hold_return")), fmt_pct(summary.get("cost_adjusted_return"))),
     ]
-    html = '<div class="metric-grid">'
-    for key, value in items:
-        neg = " negative" if str(value).startswith("-") else ""
-        html += f'<div class="metric-card"><div class="metric-label">{tr(lang, key)}</div><div class="metric-value{neg}">{value}</div></div>'
-    html += "</div>"
-    st.markdown(html, unsafe_allow_html=True)
+    html_parts = ['<div class="metric-grid">']
+    for key, value, sub in items:
+        negative = " negative" if str(value).startswith("-") else ""
+        sub_label = tr(lang, "benchmark") if key != "buy_hold_return" else tr(lang, "cost_adjusted")
+        html_parts.append(
+            f"""
+<div class="metric-card">
+  <div class="metric-label">{html.escape(tr(lang, key))}</div>
+  <div class="metric-value{negative}">{html.escape(value)}</div>
+  <div class="metric-sub">{html.escape(sub_label)} {html.escape(sub)}</div>
+</div>
+"""
+        )
+    html_parts.append("</div>")
+    st.markdown("".join(html_parts), unsafe_allow_html=True)
+
+
+def render_empty_results(lang: str) -> None:
+    with st.container(border=True):
+        section_title(6, tr(lang, "results"))
+        st.info(tr(lang, "waiting_result"))
 
 
 def render_results(summary: dict, portfolio_df: pd.DataFrame, trades_df: pd.DataFrame, report_bytes: bytes, lang: str) -> None:
-    st.markdown(f"### ? {tr(lang, 'results')} ({summary.get('start')} ? {summary.get('end')})")
-    render_metric_cards(summary, lang)
-    c1, c2, c3 = st.columns([1.25, 1.0, 1.0])
-    with c1:
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=portfolio_df["Date"], y=portfolio_df["equity"], name="Strategy", line=dict(color="#00a99d", width=2)))
-        if "buy_hold_equity" in portfolio_df.columns:
-            fig.add_trace(go.Scatter(x=portfolio_df["Date"], y=portfolio_df["buy_hold_equity"], name="Buy & Hold", line=dict(color="#94a3b8", width=1.5)))
-        fig.update_layout(title=tr(lang, "equity_curve"), height=330, margin=dict(l=20, r=20, t=48, b=20), paper_bgcolor="white", plot_bgcolor="white")
-        st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        drawdown = portfolio_df.get("drawdown")
-        if drawdown is None:
-            drawdown = portfolio_df["equity"] / portfolio_df["equity"].cummax() - 1.0
-        fig = go.Figure(go.Scatter(x=portfolio_df["Date"], y=drawdown, fill="tozeroy", name="Drawdown", line=dict(color="#14b8a6")))
-        fig.update_layout(title=tr(lang, "drawdown_curve"), height=330, margin=dict(l=20, r=20, t=48, b=20), paper_bgcolor="white", plot_bgcolor="white", yaxis_tickformat=".0%")
-        st.plotly_chart(fig, use_container_width=True)
-    with c3:
-        st.markdown(f"**{tr(lang, 'recent_trades')}**")
-        if trades_df.empty:
-            st.info("No trades")
+    with st.container(border=True):
+        top_left, top_right = st.columns([1, 0.14])
+        with top_left:
+            section_title(6, f'{tr(lang, "results")} ({summary.get("start")} 至 {summary.get("end")})')
+        with top_right:
+            st.download_button(
+                tr(lang, "export_report"),
+                data=report_bytes,
+                file_name="backtest_report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key=f"download_result_report_{lang}",
+            )
+
+        render_metric_cards(summary, lang)
+        chart_left, chart_mid, trade_right = st.columns([1.1, 1.0, 0.95], gap="medium")
+        with chart_left:
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=portfolio_df["Date"], y=portfolio_df["equity"], name="Strategy", line=dict(color="#00a99d", width=2)))
+            if "buy_hold_equity" in portfolio_df.columns:
+                fig.add_trace(
+                    go.Scatter(x=portfolio_df["Date"], y=portfolio_df["buy_hold_equity"], name="Buy & Hold", line=dict(color="#94a3b8", width=1.4))
+                )
+            fig.update_layout(
+                title=tr(lang, "equity_curve"),
+                height=305,
+                margin=dict(l=14, r=14, t=44, b=14),
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+                legend=dict(orientation="h", y=1.08),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        with chart_mid:
+            drawdown = portfolio_df.get("drawdown")
+            if drawdown is None:
+                drawdown = portfolio_df["equity"] / portfolio_df["equity"].cummax() - 1.0
+            fig = go.Figure(
+                go.Scatter(x=portfolio_df["Date"], y=drawdown, fill="tozeroy", name="Drawdown", line=dict(color="#14b8a6", width=1.6))
+            )
+            fig.update_layout(
+                title=tr(lang, "drawdown_curve"),
+                height=305,
+                margin=dict(l=14, r=14, t=44, b=14),
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+                yaxis_tickformat=".0%",
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        with trade_right:
+            title_col, view_col = st.columns([1, 0.35])
+            title_col.markdown(f"**{tr(lang, 'recent_trades')}**")
+            view_col.caption(tr(lang, "view_all"))
+            if trades_df.empty:
+                st.info("No trades")
+            else:
+                show = trades_df.copy().tail(7)
+                for col in ["date"]:
+                    if col in show.columns:
+                        show[col] = pd.to_datetime(show[col]).dt.strftime("%Y-%m-%d")
+                cols = [c for c in ["date", "symbol", "action", "price", "shares", "position_pct", "pnl_pct", "holding_days"] if c in show.columns]
+                st.dataframe(show[cols], use_container_width=True, height=270, hide_index=True)
+
+
+def render_data_panel(lang: str) -> dict:
+    with st.container(border=True):
+        section_title(1, tr(lang, "data_settings"))
+        market = st.radio(tr(lang, "market"), ["western", "china"], format_func=lambda v: tr(lang, v), horizontal=True, key="v2_market")
+        default_symbol = "510300" if market == "china" else "AAPL"
+        symbol = st.text_input(tr(lang, "symbol"), value=default_symbol, help=tr(lang, "symbol_help"), key=f"v2_symbol_{market}")
+        st.caption(symbol_display_name(symbol, market))
+        start = st.text_input(tr(lang, "start"), value="2020-01-01", key="v2_start")
+        end = st.text_input(tr(lang, "end"), value="", key="v2_end")
+        currency = currency_for_market_ui(market)
+        cash_col, currency_col = st.columns([0.72, 0.28])
+        with cash_col:
+            initial_cash = st.number_input(
+                tr(lang, "initial_cash"),
+                min_value=1.0,
+                value=10000.0 if market == "western" else 100000.0,
+                step=1000.0,
+                key=f"v2_cash_{market}",
+            )
+        with currency_col:
+            st.text_input(tr(lang, "currency"), value=currency, disabled=True, key=f"v2_currency_{market}")
+        execution_price = st.selectbox(tr(lang, "execution_price"), ["next_open", "close"], index=0, key="v2_execution")
+        commission_pct = st.number_input(tr(lang, "commission_pct"), min_value=0.0, value=0.001, step=0.0001, format="%.4f", key="v2_commission")
+        slippage_pct = st.number_input(tr(lang, "slippage_pct"), min_value=0.0, value=0.001, step=0.0001, format="%.4f", key="v2_slippage")
+        st.button(tr(lang, "more_data_options"), use_container_width=True, disabled=True, key="more_data_options")
+    return {
+        "market": market,
+        "symbol": symbol,
+        "start": start,
+        "end": end,
+        "initial_cash": initial_cash,
+        "execution_price": execution_price,
+        "commission_pct": commission_pct,
+        "slippage_pct": slippage_pct,
+        "currency": currency,
+    }
+
+
+def render_strategy_panel(lang: str, data: dict) -> tuple[str, bool]:
+    with st.container(border=True):
+        section_title(3, f'{tr(lang, "manual_strategy")} (Manual Strategy)')
+        strategy_type = st.selectbox(
+            tr(lang, "strategy_type"),
+            ["moving_average_cross", "rsi_reversal"],
+            format_func=lambda v: tr(lang, "ma_cross") if v == "moving_average_cross" else tr(lang, "rsi_reversal"),
+            key="v2_strategy",
+        )
+        st.caption(tr(lang, "ma_desc") if strategy_type == "moving_average_cross" else tr(lang, "rsi_desc"))
+        st.caption(tr(lang, "coming_next"))
+
+        param_group(tr(lang, "basic_params"))
+        base_1, base_2, base_3 = st.columns(3)
+        base_1.selectbox(tr(lang, "frequency"), [tr(lang, "daily")], key="frequency_daily")
+        base_2.number_input(tr(lang, "signal_delay"), min_value=1, max_value=5, value=1, step=1, key="signal_delay")
+        base_3.selectbox(tr(lang, "signal_direction"), [tr(lang, "long_only")], key="signal_direction")
+
+        param_group(tr(lang, "strategy_params"))
+        if strategy_type == "moving_average_cross":
+            p1, p2, p3 = st.columns(3)
+            p1.selectbox(tr(lang, "price_field"), ["close"], key="price_field_ma")
+            short_window = p2.number_input(tr(lang, "short_window"), min_value=1, value=20, step=1, key="v2_short")
+            long_window = p3.number_input(tr(lang, "long_window"), min_value=2, value=60, step=1, key="v2_long")
+            rsi_window, entry_threshold, exit_threshold = 14, 30.0, 70.0
         else:
-            cols = [c for c in ["date", "symbol", "action", "price", "shares", "pnl_pct", "holding_days"] if c in trades_df.columns]
-            st.dataframe(trades_df[cols].tail(8), use_container_width=True, height=285)
-        st.download_button(tr(lang, "export_report"), data=report_bytes, file_name="backtest_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key=f"download_result_report_{lang}")
+            p1, p2, p3 = st.columns(3)
+            rsi_window = p1.number_input(tr(lang, "rsi_window"), min_value=1, value=14, step=1, key="v2_rsi_window")
+            entry_threshold = p2.number_input(tr(lang, "entry_threshold"), min_value=0.0, max_value=100.0, value=30.0, step=1.0, key="v2_rsi_entry")
+            exit_threshold = p3.number_input(tr(lang, "exit_threshold"), min_value=0.0, max_value=100.0, value=70.0, step=1.0, key="v2_rsi_exit")
+            short_window, long_window = 20, 60
+
+        param_group(tr(lang, "risk_cost"))
+        r1, r2, r3 = st.columns(3)
+        r1.selectbox(tr(lang, "position_mode"), [tr(lang, "full_position")], key="position_mode")
+        r2.text_input(tr(lang, "position_pct"), value="100%", disabled=True, key="position_pct")
+        r3.selectbox(tr(lang, "stop_loss"), [tr(lang, "none")], key="stop_loss")
+
+        try:
+            generated_yaml = build_manual_yaml(
+                data["market"],
+                data["symbol"],
+                data["start"],
+                data["end"],
+                data["initial_cash"],
+                data["execution_price"],
+                data["commission_pct"],
+                data["slippage_pct"],
+                strategy_type,
+                int(short_window),
+                int(long_window),
+                int(rsi_window),
+                float(entry_threshold),
+                float(exit_threshold),
+            )
+        except Exception as exc:
+            generated_yaml = f"# {exc}"
+
+        run_clicked = st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key="v2_run_manual")
+    return generated_yaml, run_clicked
+
+
+def render_yaml_panel(lang: str, yaml_text: str) -> str:
+    with st.container(border=True):
+        top_1, top_2, top_3 = st.columns([1, 0.26, 0.26])
+        with top_1:
+            section_title(4, tr(lang, "yaml_preview"))
+        with top_2:
+            st.download_button(
+                tr(lang, "copy_yaml"),
+                data=yaml_text.encode("utf-8"),
+                file_name="tradetest_strategy.yaml",
+                mime="application/x-yaml",
+                use_container_width=True,
+                key="v2_download_yaml",
+            )
+        with top_3:
+            edit_yaml = st.toggle(tr(lang, "edit_yaml"), value=False, key="v2_edit_yaml")
+
+        if edit_yaml:
+            return st.text_area("YAML", value=yaml_text, height=440, key="v2_manual_yaml_edit")
+        render_yaml_code(yaml_text)
+        return yaml_text
+
+
+def render_upload_mode(lang: str, cloud: CloudStore, terminal_id: str, config_name: str) -> None:
+    st.caption(tr(lang, "yaml_tip"))
+    buttons = st.columns(3)
+    buttons[0].download_button(tr(lang, "ma_template"), data=STANDARD_MA_TEMPLATE.encode("utf-8"), file_name="ma_cross.yaml", mime="application/x-yaml", use_container_width=True, key="ma_template")
+    buttons[1].download_button(tr(lang, "rsi_template"), data=STANDARD_RSI_TEMPLATE.encode("utf-8"), file_name="rsi_reversal.yaml", mime="application/x-yaml", use_container_width=True, key="rsi_template")
+    buttons[2].download_button(tr(lang, "legacy_template"), data=LEGACY_PORTFOLIO_TEMPLATE.encode("utf-8"), file_name="portfolio_template.yaml", mime="application/x-yaml", use_container_width=True, key="legacy_template")
+
+    uploaded = st.file_uploader(tr(lang, "upload_config"), type=["yaml", "yml"], key="v2_upload_file")
+    if "v2_upload_text" not in st.session_state:
+        st.session_state["v2_upload_text"] = STANDARD_MA_TEMPLATE
+    if uploaded is not None:
+        uploaded_bytes = uploaded.getvalue()
+        upload_signature = hashlib.sha256(uploaded_bytes).hexdigest()
+        if st.session_state.get("v2_upload_sig") != upload_signature:
+            st.session_state["v2_upload_text"] = uploaded_bytes.decode("utf-8")
+            st.session_state["v2_upload_sig"] = upload_signature
+
+    yaml_text = st.text_area("YAML", value=st.session_state["v2_upload_text"], height=470, key="v2_upload_yaml")
+    st.session_state["v2_upload_text"] = yaml_text
+    if st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key="v2_run_upload"):
+        try:
+            summary, portfolio_df, trades_df, report_bytes, chart_bytes, prepared_yaml = run_yaml_backtest(yaml_text)
+            save_cloud_run_safely(cloud, terminal_id, config_name, prepared_yaml, summary, report_bytes, chart_bytes, lang)
+            st.session_state["latest_result"] = (summary, portfolio_df, trades_df, report_bytes)
+        except Exception as exc:
+            st.error(f"{tr(lang, 'run_failed')}: {exc}")
 
 
 def render_new_backtest(lang: str, cloud: CloudStore, terminal_id: str, config_name: str) -> None:
     render_steps(lang)
-    input_method = st.radio(tr(lang, "input_method"), ["manual", "upload"], horizontal=True, format_func=lambda v: tr(lang, "manual_strategy") if v == "manual" else tr(lang, "upload_yaml"), key="v2_input_method")
+    st.markdown(f'<div class="warning-strip">{html.escape(tr(lang, "risk"))}</div>', unsafe_allow_html=True)
+    input_method = st.radio(
+        tr(lang, "input_source"),
+        ["manual", "upload"],
+        horizontal=True,
+        format_func=lambda v: tr(lang, "form_config") if v == "manual" else tr(lang, "upload_yaml"),
+        key="v2_input_method",
+    )
 
     if input_method == "manual":
-        left, mid, right = st.columns([0.85, 1.9, 1.55], gap="medium")
+        left, mid, right = st.columns([0.95, 2.15, 1.7], gap="small")
         with left:
-            st.markdown(f"### ? {tr(lang, 'data_settings')}")
-            market = st.radio(tr(lang, "market"), ["western", "china"], format_func=lambda v: tr(lang, v), horizontal=True, key="v2_market")
-            default_symbol = "510300" if market == "china" else "AAPL"
-            symbol = st.text_input(tr(lang, "symbol"), value=default_symbol, key=f"v2_symbol_{market}")
-            start = st.text_input(tr(lang, "start"), value="2020-01-01", key="v2_start")
-            end = st.text_input(tr(lang, "end"), value="", key="v2_end")
-            initial_cash = st.number_input(tr(lang, "initial_cash"), min_value=1.0, value=10000.0 if market == "western" else 100000.0, step=1000.0, key=f"v2_cash_{market}")
-            execution_price = st.selectbox(tr(lang, "execution_price"), ["next_open", "close"], index=0, key="v2_execution")
-            commission_pct = st.number_input(tr(lang, "commission_pct"), min_value=0.0, value=0.001, step=0.0001, format="%.4f", key="v2_commission")
-            slippage_pct = st.number_input(tr(lang, "slippage_pct"), min_value=0.0, value=0.001, step=0.0001, format="%.4f", key="v2_slippage")
-
+            data = render_data_panel(lang)
         with mid:
-            st.markdown(f"### ? {tr(lang, 'strategy_settings')}")
-            strategy_type = st.selectbox(tr(lang, "strategy_type"), ["moving_average_cross", "rsi_reversal"], format_func=lambda v: tr(lang, "ma_cross") if v == "moving_average_cross" else tr(lang, "rsi_reversal"), key="v2_strategy")
-            st.caption(tr(lang, "coming_next"))
-            if strategy_type == "moving_average_cross":
-                c1, c2 = st.columns(2)
-                short_window = c1.number_input(tr(lang, "short_window"), min_value=1, value=20, step=1, key="v2_short")
-                long_window = c2.number_input(tr(lang, "long_window"), min_value=2, value=60, step=1, key="v2_long")
-                rsi_window, entry_threshold, exit_threshold = 14, 30.0, 70.0
-            else:
-                c1, c2, c3 = st.columns(3)
-                rsi_window = c1.number_input(tr(lang, "rsi_window"), min_value=1, value=14, step=1, key="v2_rsi_window")
-                entry_threshold = c2.number_input(tr(lang, "entry_threshold"), min_value=0.0, max_value=100.0, value=30.0, step=1.0, key="v2_rsi_entry")
-                exit_threshold = c3.number_input(tr(lang, "exit_threshold"), min_value=0.0, max_value=100.0, value=70.0, step=1.0, key="v2_rsi_exit")
-                short_window, long_window = 20, 60
-            st.markdown("&nbsp;", unsafe_allow_html=True)
-            run_clicked = st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key="v2_run_manual")
-
-        try:
-            generated_yaml = build_manual_yaml(market, symbol, start, end, initial_cash, execution_price, commission_pct, slippage_pct, strategy_type, int(short_window), int(long_window), int(rsi_window), float(entry_threshold), float(exit_threshold))
-        except Exception as exc:
-            generated_yaml = f"# {exc}"
-
+            generated_yaml, run_clicked = render_strategy_panel(lang, data)
         with right:
-            st.markdown(f"### ? {tr(lang, 'yaml_preview')}")
-            edit_yaml = st.toggle(tr(lang, "edit_yaml"), value=False, key="v2_edit_yaml")
-            if edit_yaml:
-                yaml_text = st.text_area("YAML", value=generated_yaml, height=390, key="v2_manual_yaml_edit")
-            else:
-                yaml_text = generated_yaml
-                st.code(yaml_text, language="yaml")
-            st.download_button(tr(lang, "copy_yaml"), data=yaml_text.encode("utf-8"), file_name="tradetest_strategy.yaml", mime="application/x-yaml", use_container_width=True, key="v2_download_yaml")
+            yaml_text = render_yaml_panel(lang, generated_yaml)
 
         if run_clicked:
             try:
@@ -546,83 +1258,71 @@ def render_new_backtest(lang: str, cloud: CloudStore, terminal_id: str, config_n
             except Exception as exc:
                 st.error(f"{tr(lang, 'run_failed')}: {exc}")
     else:
-        st.caption(tr(lang, "yaml_tip"))
-        uploaded = st.file_uploader(tr(lang, "upload_config"), type=["yaml", "yml"], key="v2_upload_file")
-        if "v2_upload_text" not in st.session_state:
-            st.session_state["v2_upload_text"] = STANDARD_MA_TEMPLATE
-        if uploaded is not None:
-            uploaded_bytes = uploaded.getvalue()
-            upload_signature = hashlib.sha256(uploaded_bytes).hexdigest()
-            if st.session_state.get("v2_upload_sig") != upload_signature:
-                st.session_state["v2_upload_text"] = uploaded_bytes.decode("utf-8")
-                st.session_state["v2_upload_sig"] = upload_signature
-        st.download_button("MA YAML Template", data=STANDARD_MA_TEMPLATE.encode("utf-8"), file_name="ma_cross.yaml", mime="application/x-yaml", key="ma_template")
-        st.download_button("RSI YAML Template", data=STANDARD_RSI_TEMPLATE.encode("utf-8"), file_name="rsi_reversal.yaml", mime="application/x-yaml", key="rsi_template")
-        yaml_text = st.text_area("YAML", value=st.session_state["v2_upload_text"], height=520, key="v2_upload_yaml")
-        st.session_state["v2_upload_text"] = yaml_text
-        if st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key="v2_run_upload"):
-            try:
-                summary, portfolio_df, trades_df, report_bytes, chart_bytes, prepared_yaml = run_yaml_backtest(yaml_text)
-                save_cloud_run_safely(cloud, terminal_id, config_name, prepared_yaml, summary, report_bytes, chart_bytes, lang)
-                st.session_state["latest_result"] = (summary, portfolio_df, trades_df, report_bytes)
-            except Exception as exc:
-                st.error(f"{tr(lang, 'run_failed')}: {exc}")
+        render_upload_mode(lang, cloud, terminal_id, config_name)
 
     if "latest_result" in st.session_state:
         summary, portfolio_df, trades_df, report_bytes = st.session_state["latest_result"]
         render_results(summary, portfolio_df, trades_df, report_bytes, lang)
+    else:
+        render_empty_results(lang)
 
 
 def render_history(lang: str, cloud: CloudStore) -> None:
-    st.markdown(f"### {tr(lang, 'cloud_history')}")
-    st.caption(tr(lang, "history_intro"))
-    if not cloud.enabled:
-        st.info(tr(lang, "history_disabled"))
-        return
-    try:
-        runs = cloud.list_runs()
-        if not runs:
-            st.info(tr(lang, "no_runs"))
+    with st.container(border=True):
+        section_title(2, tr(lang, "cloud_history"))
+        st.caption(tr(lang, "history_intro"))
+        if not cloud.enabled:
+            st.info(tr(lang, "history_disabled"))
             return
-        df = pd.DataFrame(runs)
-        cols = [c for c in ["created_at", "terminal_id", "config_name", "strategy_type", "symbols", "total_return", "max_drawdown", "trade_count"] if c in df.columns]
-        st.dataframe(df[cols], use_container_width=True, height=420)
-        selected = st.selectbox(tr(lang, "open_run"), df["id"].tolist(), format_func=lambda x: f"{df[df['id'] == x].iloc[0]['created_at']} | {df[df['id'] == x].iloc[0]['config_name']}", key="history_selector")
-        row = df[df["id"] == selected].iloc[0]
-        st.code(row.get("config_yaml", ""), language="yaml")
-        if row.get("chart_png_url"):
-            st.image(row["chart_png_url"], use_container_width=True)
-        if row.get("report_xlsx_url"):
-            st.link_button(tr(lang, "open_report"), row["report_xlsx_url"], use_container_width=True)
-    except Exception as exc:
-        st.error(str(exc))
+        try:
+            runs = cloud.list_runs()
+            if not runs:
+                st.info(tr(lang, "no_runs"))
+                return
+            df = pd.DataFrame(runs)
+            cols = [c for c in ["created_at", "terminal_id", "config_name", "strategy_type", "symbols", "total_return", "max_drawdown", "trade_count"] if c in df.columns]
+            st.dataframe(df[cols], use_container_width=True, height=420, hide_index=True)
+            selected = st.selectbox(
+                tr(lang, "open_run"),
+                df["id"].tolist(),
+                format_func=lambda x: f"{df[df['id'] == x].iloc[0]['created_at']} | {df[df['id'] == x].iloc[0]['config_name']}",
+                key="history_selector",
+            )
+            row = df[df["id"] == selected].iloc[0]
+            st.code(row.get("config_yaml", ""), language="yaml")
+            if row.get("chart_png_url"):
+                st.image(row["chart_png_url"], use_container_width=True)
+            if row.get("report_xlsx_url"):
+                st.link_button(tr(lang, "open_report"), row["report_xlsx_url"], use_container_width=True)
+        except Exception as exc:
+            st.error(str(exc))
+
+
+def render_footer(lang: str) -> None:
+    st.markdown(
+        f"""
+<div class="footer-bar">
+  <div>{html.escape(tr(lang, "risk"))}</div>
+  <div>{html.escape(tr(lang, "footer_source"))}: Yahoo Finance / Tushare</div>
+  <div>{html.escape(tr(lang, "footer_update"))}: {pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")}</div>
+</div>
+""",
+        unsafe_allow_html=True,
+    )
 
 
 def main() -> None:
-    st.set_page_config(page_title=APP_NAME, page_icon="TT", layout="wide")
+    st.set_page_config(page_title=APP_NAME, page_icon="TT", layout="wide", initial_sidebar_state="expanded")
     inject_css()
     cloud = CloudStore(get_streamlit_secrets())
-
-    with st.sidebar:
-        lang_label = st.selectbox(TEXT["zh"]["language"], ["??", "English"], index=0, key="language_selector")
-        lang = "zh" if lang_label == "??" else "en"
-        st.markdown("## TradeTest")
-        page = st.radio("", ["new", "history"], format_func=lambda v: tr(lang, "new_backtest") if v == "new" else tr(lang, "cloud_history"), key="page_selector")
-        st.markdown("---")
-        st.markdown(f"### {tr(lang, 'cloud')}")
-        terminal_id = st.text_input(tr(lang, "terminal_id"), value=default_terminal_id(), key="terminal_id")
-        config_name = st.text_input(tr(lang, "config_name"), value="web_config", key="config_name")
-        if cloud.enabled:
-            st.success(tr(lang, "cloud_enabled"))
-        else:
-            st.info(tr(lang, "cloud_disabled"))
+    lang, page, terminal_id, config_name = render_sidebar("zh", cloud)
 
     render_header(lang)
     if page == "new":
         render_new_backtest(lang, cloud, terminal_id, config_name)
     else:
         render_history(lang, cloud)
-    st.markdown(f'<div class="footer-note">{tr(lang, "risk")}</div>', unsafe_allow_html=True)
+    render_footer(lang)
 
 
 if __name__ == "__main__":
