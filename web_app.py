@@ -1,23 +1,56 @@
+
 import hashlib
 import os
 import shutil
 import tempfile
-from copy import deepcopy
 from pathlib import Path
 from uuid import uuid4
 
 import pandas as pd
-import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 import yaml
 
 import backtest
+import rule_engine
+import yaml_builder
 from cloud_store import CloudStore, default_terminal_id
 
 
 APP_NAME = "TradeTest"
 
-DEFAULT_UPLOAD_CONFIG = """data:
+STANDARD_MA_TEMPLATE = yaml_builder.config_to_yaml(
+    yaml_builder.build_moving_average_config(
+        market="western",
+        symbol="AAPL",
+        start="2020-01-01",
+        end=None,
+        initial_cash=10000,
+        execution_price="next_open",
+        commission_pct=0.001,
+        slippage_pct=0.001,
+        short_window=20,
+        long_window=60,
+    )
+)
+
+STANDARD_RSI_TEMPLATE = yaml_builder.config_to_yaml(
+    yaml_builder.build_rsi_reversal_config(
+        market="western",
+        symbol="AAPL",
+        start="2020-01-01",
+        end=None,
+        initial_cash=10000,
+        execution_price="next_open",
+        commission_pct=0.001,
+        slippage_pct=0.001,
+        rsi_window=14,
+        entry_threshold=30,
+        exit_threshold=70,
+    )
+)
+
+LEGACY_PORTFOLIO_TEMPLATE = """data:
   market: "western"
   symbols:
     VFV.TO: "VFV"
@@ -43,436 +76,144 @@ strategy:
     TSLA.NE: 0.10
   rebalance_frequency: "monthly"
   rebalance_threshold: 0.05
-  max_weights:
-    VFV.TO: 0.70
-    QQC.TO: 0.45
-    TSLA.NE: 0.15
-  min_weights:
-    VFV.TO: 0.40
-    QQC.TO: 0.20
-    TSLA.NE: 0.00
   cash_buffer: 0.02
 
 report:
   output_dir: "results"
 """
 
-CHINA_UPLOAD_CONFIG = """data:
-  market: "china"
-  symbols:
-    "600519": "Kweichow Moutai"
-    "000001": "Ping An Bank"
-    "510300": "CSI 300 ETF"
-  start: "2021-05-10"
-  end: null
-
-account:
-  initial_cash: 100000
-  currency: "CNY"
-
-costs:
-  commission: 5.0
-  slippage: 0.001
-
-strategy:
-  type: "monthly_rebalance"
-  execution_timing: "next_open"
-  target_weights:
-    "600519": 0.40
-    "000001": 0.30
-    "510300": 0.30
-  rebalance_frequency: "monthly"
-  rebalance_threshold: 0.05
-  max_weights:
-    "600519": 0.55
-    "000001": 0.45
-    "510300": 0.45
-  min_weights:
-    "600519": 0.10
-    "000001": 0.10
-    "510300": 0.10
-  cash_buffer: 0.02
-
-report:
-  output_dir: "results"
-"""
-
-GPT_CONFIG_PROMPTS = {
-    "en": """You are helping me create a TradeTest backtest YAML config.
-
-Use the YAML template below as the exact format. Keep the same top-level sections:
-data, account, costs, strategy, report.
-
-My natural-language request:
-[Write your request here. Example: Backtest a Canadian ETF portfolio with VFV.TO 50%, QQC.TO 30%, XEI.TO 20%, starting from 2021-01-01, initial cash 20000 CAD, monthly rebalance, next open execution.]
-
-Rules:
-- Return only valid YAML.
-- Do not add Markdown fences.
-- Choose exactly one data.market: "western" or "china".
-- If data.market is "china", use A-share tickers only, such as 600519, 000001, or 510300. TradeTest will convert them to Yahoo Finance suffixes automatically and use CNY.
-- If data.market is "western", do not include Chinese A-share tickers.
-- For multiple stocks, use data.symbols as a mapping from ticker to display name.
-- target_weights must add up to about 1.0.
-- Use execution_timing: "next_open".
-- rebalance_frequency can be "daily", "weekly", or "monthly".
-- end can be null if I want the latest available data.
-
-YAML template:
-""",
-    "zh": """你正在帮我创建一个 TradeTest 回测 YAML 配置。
-
-请严格按照下面的 YAML 模板格式生成，保留相同的顶层结构：
-data, account, costs, strategy, report。
-
-我的自然语言需求：
-[在这里写你的需求。例如：帮我回测一个加拿大 ETF 组合，VFV.TO 50%，QQC.TO 30%，XEI.TO 20%，从 2021-01-01 开始，初始资金 20000 加币，每月调仓，信号后下一个交易日开盘执行。]
-
-规则：
-- 只返回有效 YAML。
-- 不要添加 Markdown 代码块。
-- data.market 只能二选一："western" 或 "china"。
-- 如果 data.market 是 "china"，只能使用中国 A 股代码，例如 600519、000001 或 510300。TradeTest 会自动转换成 Yahoo Finance 后缀，并使用人民币 CNY。
-- 如果 data.market 是 "western"，不要混入中国 A 股代码。
-- 多只股票时，使用 data.symbols，把股票代码映射到显示名称。
-- target_weights 加起来应接近 1.0。
-- 使用 execution_timing: "next_open"。
-- rebalance_frequency 可以是 "daily"、"weekly" 或 "monthly"。
-- 如果我要使用最新可用数据，end 可以填 null。
-
-YAML 模板：
-""",
-}
-
-I18N = {
+TEXT = {
+    "zh": {
+        "app_subtitle": "Daily Stock & ETF Backtesting Engine",
+        "language": "Language / ??",
+        "new_backtest": "????",
+        "cloud_history": "????",
+        "docs": "??",
+        "cloud": "??",
+        "terminal_id": "?? ID",
+        "config_name": "????",
+        "cloud_enabled": "???????",
+        "cloud_disabled": "?? SUPABASE_URL ? SUPABASE_KEY ????????",
+        "data_settings": "????",
+        "input_method": "????",
+        "strategy_settings": "????",
+        "yaml_preview": "YAML ?? / ????",
+        "run_backtest": "???? (Run Backtest)",
+        "results": "????",
+        "manual_strategy": "????",
+        "upload_yaml": "?? YAML",
+        "market": "??",
+        "western": "????",
+        "china": "?? A ?",
+        "symbol": "?? Symbol",
+        "start": "????",
+        "end": "????",
+        "initial_cash": "????",
+        "execution_price": "????",
+        "commission_pct": "????",
+        "slippage_pct": "??",
+        "strategy_type": "????",
+        "ma_cross": "????",
+        "rsi_reversal": "RSI ??",
+        "short_window": "???",
+        "long_window": "???",
+        "rsi_window": "RSI ??",
+        "entry_threshold": "????",
+        "exit_threshold": "????",
+        "coming_next": "Breakout / Bollinger Band ????????",
+        "copy_yaml": "?? YAML",
+        "edit_yaml": "?? YAML",
+        "upload_config": "?? YAML ??",
+        "yaml_tip": "???????? YAML??? YAML ?????? parser ? engine?",
+        "run_failed": "????",
+        "saved_to_cloud": "??????",
+        "export_report": "?? Excel ??",
+        "total_return": "????",
+        "annual_return": "?????",
+        "max_drawdown": "????",
+        "sharpe_ratio": "????",
+        "win_rate": "??",
+        "trade_count": "????",
+        "profit_factor": "???",
+        "buy_hold_return": "??????",
+        "equity_curve": "????",
+        "drawdown_curve": "????",
+        "recent_trades": "??????",
+        "history_intro": "???????????YAML???? Excel ???",
+        "history_disabled": "????????",
+        "no_runs": "???????????",
+        "open_run": "????",
+        "open_report": "?? Excel ??",
+        "risk": "????????????????????????????????????????",
+    },
     "en": {
-        "language": "Language",
-        "caption": "Backtest workspace with guided config, YAML upload, cloud history, and report download.",
-        "intro": """
-TradeTest helps you run stock or ETF backtests from either a guided form or a YAML config.
-It supports multi-symbol portfolios, daily/weekly/monthly rebalancing, cloud history,
-Excel reports, and downloadable charts.
-""",
-        "step_1": "1. Build a config with the form, upload YAML, or ask GPT to generate YAML from the template.",
-        "step_2": "2. Run the backtest with next-open execution on daily market data.",
-        "step_3": "3. Review results, download the Excel report, and check cloud history later.",
-        "start_here": "Start here: YAML template and GPT workflow",
-        "workflow": """
-Recommended workflow for non-technical users:
-
-1. Download the YAML template below.
-2. Give the template to GPT.
-3. Describe your strategy in natural language.
-4. Ask GPT to return valid YAML in the same format.
-5. Upload that YAML in the `Upload YAML` mode and run the backtest.
-""",
-        "download_template": "Download YAML template",
-        "download_china_template": "Download China YAML template",
-        "download_prompt": "Download GPT prompt",
-        "copy_prompt": "Copy this prompt to GPT if you want it to generate a config for you:",
-        "settings_meaning": "What the main settings mean",
-        "settings_text": """
-- `symbols`: Tickers to backtest. For portfolios, use multiple tickers.
-- `market`: Choose `western` or `china`. The two markets cannot be mixed in one backtest.
-- `currency`: Automatically becomes `CNY` for China market and `MARKET_NATIVE` for western market.
-- `initial_cash`: Starting capital.
-- `commission`: Fixed trading cost per order.
-- `slippage`: Estimated trading price impact, for example `0.001` means 0.1%.
-- `strategy.type`: Use `monthly_rebalance` for portfolio rebalancing or `ma_crossover` for moving-average signals.
-- `execution_timing`: `next_open` means signals are generated from daily data and executed at the next trading day's open.
-- `rebalance_frequency`: `daily`, `weekly`, or `monthly`.
-- `target_weights`: Desired portfolio weights. They should add up to about `1.0`.
-""",
-        "risk_warning": "Backtests are research tools, not investment advice. Real trading can differ because of liquidity, taxes, spreads, data quality, and execution delays.",
+        "app_subtitle": "Daily Stock & ETF Backtesting Engine",
+        "language": "Language / ??",
+        "new_backtest": "New Backtest",
+        "cloud_history": "Cloud History",
+        "docs": "Docs",
         "cloud": "Cloud",
         "terminal_id": "Terminal ID",
-        "config_name": "Config name",
+        "config_name": "Config Name",
         "cloud_enabled": "Cloud sync enabled",
         "cloud_disabled": "Set SUPABASE_URL and SUPABASE_KEY to enable cloud sync",
-        "run_tab": "Run Backtest",
-        "history_tab": "Cloud History",
-        "config_source": "Config source",
-        "market": "Market",
-        "western_market": "Western market",
-        "china_market": "China A-share market",
-        "market_help": "Choose one market only. China and western markets cannot be mixed in the same backtest.",
-        "currency_notice": "Selected currency: {currency}. China market automatically uses CNY to avoid FX mixing.",
-        "guided_form": "Guided form",
+        "data_settings": "Data Settings",
+        "input_method": "Input Method",
+        "strategy_settings": "Strategy Settings",
+        "yaml_preview": "YAML Preview / Advanced Edit",
+        "run_backtest": "Run Backtest",
+        "results": "Backtest Results",
+        "manual_strategy": "Manual Strategy",
         "upload_yaml": "Upload YAML",
-        "strategy": "Strategy",
-        "execution": "Execution",
-        "rebalance": "Rebalance",
-        "start": "Start",
-        "end": "End",
-        "tickers": "Tickers",
-        "initial_cash": "Initial cash",
-        "commission": "Commission",
-        "slippage": "Slippage",
-        "fast_ma": "Fast MA",
-        "slow_ma": "Slow MA",
-        "threshold": "Threshold",
-        "cash_buffer": "Cash buffer",
-        "run_backtest": "Run backtest",
-        "strategy_help": "monthly_rebalance is portfolio rebalancing. ma_crossover uses fast/slow moving averages.",
-        "execution_help": "next_open means the signal is generated from daily data and the trade executes at the next trading day's open.",
-        "rebalance_help": "How often the portfolio tries to return to target weights.",
-        "start_help": "First date used in the backtest.",
-        "end_help": "Leave empty to use the latest available data.",
-        "date_format_help": "Use YYYY-MM-DD format.",
-        "tickers_help": "Comma-separated tickers. Western example: VFV.TO,QQC.TO,TSLA.NE. China example: 600519,000001,510300.",
-        "initial_cash_help": "Starting capital for the whole portfolio.",
-        "commission_help": "Fixed commission cost per trade.",
-        "slippage_help": "Estimated price impact. 0.001 means 0.1%.",
-        "fast_ma_help": "Fast moving-average window for ma_crossover.",
-        "slow_ma_help": "Slow moving-average window for ma_crossover. Must be greater than Fast MA.",
-        "threshold_help": "Only rebalance when a holding drifts away from target by this amount.",
-        "cash_buffer_help": "Cash kept aside instead of investing 100% of capital.",
-        "yaml_tip": "Tip: Give the template to GPT, describe your strategy in natural language, then upload the YAML GPT returns.",
-        "upload_config": "Upload YAML config",
-        "yaml_label": "YAML",
-        "saved_to_cloud": "Saved to cloud",
-        "run_failed": "Run failed",
-        "invalid_tickers": "At least one ticker is required",
-        "invalid_ma": "Invalid MA params: require 0 < fast_ma < slow_ma",
-        "final_equity": "Final Equity",
-        "total_return": "Total Return",
-        "max_drawdown": "Max Drawdown",
-        "trade_count": "Trade Count",
-        "metrics_caption": "Final Equity is ending portfolio value. Total Return is total portfolio gain/loss. Max Drawdown is the largest peak-to-trough decline. Trade Count counts BUY orders.",
-        "equity_curve": "Portfolio Equity Curve",
-        "equity_caption": "The equity curve shows portfolio value over time after costs, slippage, and strategy execution rules.",
-        "summary_table": "Summary",
-        "trade_log": "Trade log",
-        "download_report": "Download Excel report",
-        "history_intro": """
-Cloud History stores completed backtest summaries, YAML configs, charts, and Excel reports.
-Use `Terminal ID` and `Config name` in the sidebar to identify who ran each test and which config it used.
-""",
-        "history_disabled": "Cloud history is disabled until SUPABASE_URL and SUPABASE_KEY are set.",
-        "no_runs": "No saved runs yet.",
-        "open_run": "Open run",
-        "open_report": "Open Excel report",
-        "history_failed": "Could not load cloud history",
-    },
-    "zh": {
-        "language": "语言",
-        "caption": "支持表单配置、YAML 上传、云端历史和 Excel 报告下载的回测工作台。",
-        "intro": """
-TradeTest 可以通过表单或 YAML 配置运行股票/ETF 回测。
-它支持多股票组合、日/周/月调仓、云端历史记录、Excel 报告和图表下载。
-""",
-        "step_1": "1. 用表单创建配置、上传 YAML，或让 GPT 按模板生成 YAML。",
-        "step_2": "2. 使用日线数据，并按 next_open 规则执行回测。",
-        "step_3": "3. 查看结果、下载 Excel 报告，并在云端历史里复查。",
-        "start_here": "从这里开始：YAML 模板和 GPT 生成流程",
-        "workflow": """
-推荐给非技术用户的流程：
-
-1. 下载下面的 YAML 模板。
-2. 把模板发给 GPT。
-3. 用自然语言描述你的策略需求。
-4. 让 GPT 按同样格式返回有效 YAML。
-5. 在 `上传 YAML` 模式里上传 GPT 返回的 YAML，然后运行回测。
-""",
-        "download_template": "下载 YAML 模板",
-        "download_china_template": "下载中国股市 YAML 模板",
-        "download_prompt": "下载 GPT 提示词",
-        "copy_prompt": "如果你想让 GPT 生成配置，可以复制这段提示词：",
-        "settings_meaning": "主要参数说明",
-        "settings_text": """
-- `symbols`：要回测的股票代码。组合回测可以填写多只。
-- `market`：只能选择 `western` 或 `china`，同一次回测不能混合中国股市和欧美股市。
-- `currency`：中国股市自动使用 `CNY`；欧美股市使用 `MARKET_NATIVE`，不做汇率换算。
-- `initial_cash`：初始资金。
-- `commission`：每笔交易的固定手续费。
-- `slippage`：估算滑点，例如 `0.001` 表示 0.1%。
-- `strategy.type`：`monthly_rebalance` 表示组合调仓，`ma_crossover` 表示均线策略。
-- `execution_timing`：`next_open` 表示用日线数据生成信号，并在下一个交易日开盘执行。
-- `rebalance_frequency`：可以是 `daily`、`weekly` 或 `monthly`。
-- `target_weights`：目标组合权重，总和应接近 `1.0`。
-""",
-        "risk_warning": "回测只是研究工具，不是投资建议。真实交易会受到流动性、税费、买卖价差、数据质量和执行延迟等因素影响。",
-        "cloud": "云端",
-        "terminal_id": "终端 ID",
-        "config_name": "配置名称",
-        "cloud_enabled": "云端同步已开启",
-        "cloud_disabled": "设置 SUPABASE_URL 和 SUPABASE_KEY 后可开启云端同步",
-        "run_tab": "运行回测",
-        "history_tab": "云端历史",
-        "config_source": "配置来源",
-        "market": "市场",
-        "western_market": "欧美股市",
-        "china_market": "中国 A 股",
-        "market_help": "市场只能二选一。同一次回测不能混合中国股市和欧美股市。",
-        "currency_notice": "当前币种：{currency}。选择中国股市会自动使用人民币 CNY，避免汇率混合。",
-        "guided_form": "表单配置",
-        "upload_yaml": "上传 YAML",
-        "strategy": "策略",
-        "execution": "执行方式",
-        "rebalance": "调仓频率",
-        "start": "开始日期",
-        "end": "结束日期",
-        "tickers": "股票代码",
-        "initial_cash": "初始资金",
-        "commission": "手续费",
-        "slippage": "滑点",
-        "fast_ma": "快均线",
-        "slow_ma": "慢均线",
-        "threshold": "调仓阈值",
-        "cash_buffer": "现金缓冲",
-        "run_backtest": "运行回测",
-        "strategy_help": "monthly_rebalance 表示组合调仓；ma_crossover 使用快/慢均线信号。",
-        "execution_help": "next_open 表示用日线数据生成信号，并在下一个交易日开盘执行。",
-        "rebalance_help": "组合尝试回到目标权重的频率。",
-        "start_help": "回测使用的第一天。",
-        "end_help": "留空表示使用最新可用数据。",
-        "date_format_help": "请使用 YYYY-MM-DD 格式。",
-        "tickers_help": "用英文逗号分隔股票代码。欧美示例：VFV.TO,QQC.TO,TSLA.NE。中国示例：600519,000001,510300。",
-        "initial_cash_help": "整个组合的起始资金。",
-        "commission_help": "每笔交易的固定手续费。",
-        "slippage_help": "估算价格冲击。0.001 表示 0.1%。",
-        "fast_ma_help": "ma_crossover 策略的快均线窗口。",
-        "slow_ma_help": "ma_crossover 策略的慢均线窗口，必须大于快均线。",
-        "threshold_help": "持仓偏离目标权重超过该数值时才调仓。",
-        "cash_buffer_help": "保留的现金比例，不把 100% 资金全部投入。",
-        "yaml_tip": "提示：把模板给 GPT，用自然语言描述策略，然后上传 GPT 返回的 YAML。",
-        "upload_config": "上传 YAML 配置",
-        "yaml_label": "YAML",
-        "saved_to_cloud": "已保存到云端",
-        "run_failed": "运行失败",
-        "invalid_tickers": "至少需要一个股票代码",
-        "invalid_ma": "均线参数无效：需要 0 < fast_ma < slow_ma",
-        "final_equity": "最终资产",
-        "total_return": "总收益率",
-        "max_drawdown": "最大回撤",
-        "trade_count": "交易次数",
-        "metrics_caption": "最终资产是回测结束时的组合价值。总收益率是组合整体盈亏。最大回撤是从高点到低点的最大跌幅。交易次数统计 BUY 买入订单。",
-        "equity_curve": "组合资产曲线",
-        "equity_caption": "资产曲线展示扣除手续费、滑点并应用策略执行规则后的组合价值变化。",
-        "summary_table": "结果摘要",
-        "trade_log": "交易明细",
-        "download_report": "下载 Excel 报告",
-        "history_intro": """
-云端历史会保存已完成回测的摘要、YAML 配置、图表和 Excel 报告。
-你可以用侧边栏的 `终端 ID` 和 `配置名称` 区分是谁运行的，以及使用了哪个配置。
-""",
-        "history_disabled": "云端历史未开启，需要设置 SUPABASE_URL 和 SUPABASE_KEY。",
-        "no_runs": "还没有保存的回测记录。",
-        "open_run": "打开记录",
-        "open_report": "打开 Excel 报告",
-        "history_failed": "无法加载云端历史",
-    },
-}
-
-SUMMARY_LABELS = {
-    "en": {
         "market": "Market",
-        "currency": "Currency",
-        "strategy_type": "Strategy",
-        "execution_timing": "Execution",
-        "rebalance_frequency": "Rebalance",
-        "symbols": "Tickers",
-        "symbol_names": "Ticker names",
-        "start": "Start",
-        "end": "End",
-        "initial_cash": "Initial cash",
-        "final_equity": "Final equity",
-        "total_return": "Total return",
-        "max_drawdown": "Max drawdown",
-        "trade_count": "Trade count",
-        "buy_hold_return": "Buy-hold return",
-    },
-    "zh": {
-        "market": "市场",
-        "currency": "币种",
-        "strategy_type": "策略",
-        "execution_timing": "执行方式",
-        "rebalance_frequency": "调仓频率",
-        "symbols": "股票代码",
-        "symbol_names": "股票名称",
-        "start": "开始日期",
-        "end": "结束日期",
-        "initial_cash": "初始资金",
-        "final_equity": "最终资产",
-        "total_return": "总收益率",
-        "max_drawdown": "最大回撤",
-        "trade_count": "交易次数",
-        "buy_hold_return": "买入持有收益率",
-    },
-}
-
-TRADE_LABELS = {
-    "en": {
-        "date": "Date",
-        "symbol": "Ticker",
-        "action": "Action",
-        "price": "Price",
-        "shares": "Shares",
-        "commission": "Commission",
-        "cash_after": "Cash after",
-    },
-    "zh": {
-        "date": "日期",
-        "symbol": "股票代码",
-        "action": "操作",
-        "price": "价格",
-        "shares": "股数",
-        "commission": "手续费",
-        "cash_after": "交易后现金",
+        "western": "Western Market",
+        "china": "China A-share",
+        "symbol": "Symbol",
+        "start": "Start Date",
+        "end": "End Date",
+        "initial_cash": "Initial Cash",
+        "execution_price": "Execution Price",
+        "commission_pct": "Commission Rate",
+        "slippage_pct": "Slippage",
+        "strategy_type": "Strategy Type",
+        "ma_cross": "Moving Average Cross",
+        "rsi_reversal": "RSI Reversal",
+        "short_window": "Short Window",
+        "long_window": "Long Window",
+        "rsi_window": "RSI Window",
+        "entry_threshold": "Entry Threshold",
+        "exit_threshold": "Exit Threshold",
+        "coming_next": "Breakout / Bollinger Band will be supported in the next release.",
+        "copy_yaml": "Download YAML",
+        "edit_yaml": "Edit YAML",
+        "upload_config": "Upload YAML Config",
+        "yaml_tip": "Manual strategy generates YAML first; uploaded YAML uses the same parser and engine.",
+        "run_failed": "Run failed",
+        "saved_to_cloud": "Saved to cloud",
+        "export_report": "Export Excel Report",
+        "total_return": "Total Return",
+        "annual_return": "Annual Return",
+        "max_drawdown": "Max Drawdown",
+        "sharpe_ratio": "Sharpe Ratio",
+        "win_rate": "Win Rate",
+        "trade_count": "Trade Count",
+        "profit_factor": "Profit Factor",
+        "buy_hold_return": "Buy & Hold Return",
+        "equity_curve": "Equity Curve",
+        "drawdown_curve": "Drawdown Curve",
+        "recent_trades": "Recent Trades",
+        "history_intro": "Cloud history stores backtest summaries, YAML configs, charts, and Excel reports.",
+        "history_disabled": "Cloud history is disabled.",
+        "no_runs": "No saved runs yet.",
+        "open_run": "Open Run",
+        "open_report": "Open Excel Report",
+        "risk": "Disclaimer: Information is for research only and is not investment advice. Investing involves risk.",
     },
 }
 
-HISTORY_LABELS = {
-    "en": {
-        "created_at": "Created at",
-        "terminal_id": "Terminal ID",
-        "config_name": "Config name",
-        "strategy_type": "Strategy",
-        "symbols": "Tickers",
-        "total_return": "Total return",
-        "max_drawdown": "Max drawdown",
-        "trade_count": "Trade count",
-        "report_xlsx_url": "Excel report",
-    },
-    "zh": {
-        "created_at": "创建时间",
-        "terminal_id": "终端 ID",
-        "config_name": "配置名称",
-        "strategy_type": "策略",
-        "symbols": "股票代码",
-        "total_return": "总收益率",
-        "max_drawdown": "最大回撤",
-        "trade_count": "交易次数",
-        "report_xlsx_url": "Excel 报告",
-    },
-}
 
-OPTION_LABELS = {
-    "en": {
-        "monthly_rebalance": "Periodic rebalance",
-        "ma_crossover": "Moving average crossover",
-        "next_open": "Next open",
-        "daily": "Daily",
-        "weekly": "Weekly",
-        "monthly": "Monthly",
-        "western": "Western market",
-        "china": "China A-share market",
-        "BUY": "Buy",
-        "SELL": "Sell",
-    },
-    "zh": {
-        "monthly_rebalance": "组合定期调仓",
-        "ma_crossover": "均线交叉策略",
-        "next_open": "下个交易日开盘",
-        "daily": "每日",
-        "weekly": "每周",
-        "monthly": "每月",
-        "western": "欧美股市",
-        "china": "中国 A 股",
-        "BUY": "买入",
-        "SELL": "卖出",
-    },
-}
+def tr(lang: str, key: str) -> str:
+    return TEXT[lang].get(key, key)
 
 
 def get_streamlit_secrets() -> dict:
@@ -482,201 +223,18 @@ def get_streamlit_secrets() -> dict:
         return {}
 
 
-def tr(lang: str, key: str) -> str:
-    return I18N[lang][key]
+def fmt_pct(value: float | int | None) -> str:
+    if value is None or pd.isna(value):
+        return "--"
+    return f"{float(value):+.2%}"
 
 
-def prompt_text(lang: str) -> str:
-    return GPT_CONFIG_PROMPTS[lang] + "\nWestern market YAML template:\n" + DEFAULT_UPLOAD_CONFIG + "\nChina market YAML template:\n" + CHINA_UPLOAD_CONFIG
-
-
-def rename_columns(df: pd.DataFrame, labels: dict[str, str]) -> pd.DataFrame:
-    return df.rename(columns={col: labels.get(col, col) for col in df.columns})
-
-
-def label_for(lang: str, value: str) -> str:
-    return OPTION_LABELS[lang].get(str(value), str(value))
-
-
-def web_parse_market(cfg: dict) -> str:
-    if hasattr(backtest, "parse_market"):
-        return backtest.parse_market(cfg)
-
-    market = str(cfg.get("data", {}).get("market", "western")).strip().lower()
-    aliases = {
-        "western": "western",
-        "global": "western",
-        "us_eu": "western",
-        "us": "western",
-        "europe": "western",
-        "china": "china",
-        "cn": "china",
-        "a_share": "china",
-        "a-share": "china",
-    }
-    if market not in aliases:
-        raise ValueError("data.market must be one of: western, china")
-    return aliases[market]
-
-
-def web_currency_for_market(market: str) -> str:
-    if hasattr(backtest, "currency_for_market"):
-        return backtest.currency_for_market(market)
-    return "CNY" if market == "china" else "MARKET_NATIVE"
-
-
-def web_normalize_symbol_for_market(symbol: object, market: str) -> str:
-    if hasattr(backtest, "normalize_symbol_for_market"):
-        return backtest.normalize_symbol_for_market(symbol, market)
-
-    if isinstance(symbol, int):
-        s = f"{symbol:06d}"
-    else:
-        s = str(symbol).strip().upper()
-    if not s:
-        raise ValueError("Empty ticker symbol")
-
-    if market == "china":
-        if s.endswith(".SH"):
-            s = s[:-3] + ".SS"
-        elif s.endswith(".SSE"):
-            s = s[:-4] + ".SS"
-        elif s.endswith(".SZSE"):
-            s = s[:-5] + ".SZ"
-
-        if s.endswith((".SS", ".SZ")):
-            return s
-        if s.isdigit() and len(s) == 6:
-            suffix = ".SS" if s.startswith(("5", "6", "9")) else ".SZ"
-            return f"{s}{suffix}"
-        raise ValueError(f"China market supports A-share tickers only, such as 600519, 600519.SS, 000001, or 000001.SZ: {symbol}")
-
-    if s.endswith((".SS", ".SZ", ".SH", ".SSE", ".SZSE")) or (s.isdigit() and len(s) == 6):
-        raise ValueError(f"Chinese ticker detected while data.market is western: {symbol}")
-    return s
-
-
-def web_prepare_config(cfg: dict) -> dict:
-    if hasattr(backtest, "prepare_config"):
-        return backtest.prepare_config(cfg)
-
-    prepared = deepcopy(cfg)
-    market = web_parse_market(prepared)
-    data_cfg = prepared.setdefault("data", {})
-    data_cfg["market"] = market
-    prepared.setdefault("account", {})["currency"] = web_currency_for_market(market)
-
-    symbol_map: dict[str, str] = {}
-    symbols = data_cfg.get("symbols")
-    symbol = data_cfg.get("symbol")
-
-    def remember_symbol(raw: object, normalized: str) -> None:
-        raw_key = str(raw).strip()
-        symbol_map[raw_key] = normalized
-        symbol_map[raw_key.upper()] = normalized
-        symbol_map[normalized] = normalized
-
-    if isinstance(symbols, dict):
-        normalized_symbols = {}
-        for raw, name in symbols.items():
-            normalized = web_normalize_symbol_for_market(raw, market)
-            remember_symbol(raw, normalized)
-            normalized_symbols[normalized] = str(name)
-        data_cfg["symbols"] = normalized_symbols
-        data_cfg.pop("symbol", None)
-    elif isinstance(symbols, list):
-        normalized_list = []
-        for raw in symbols:
-            normalized = web_normalize_symbol_for_market(raw, market)
-            remember_symbol(raw, normalized)
-            normalized_list.append(normalized)
-        data_cfg["symbols"] = normalized_list
-        data_cfg.pop("symbol", None)
-    elif isinstance(symbols, str) and symbols.strip():
-        normalized = web_normalize_symbol_for_market(symbols, market)
-        remember_symbol(symbols, normalized)
-        data_cfg["symbol"] = normalized
-        data_cfg.pop("symbols", None)
-    elif symbol is not None and str(symbol).strip():
-        normalized = web_normalize_symbol_for_market(symbol, market)
-        remember_symbol(symbol, normalized)
-        data_cfg["symbol"] = normalized
-
-    strategy_cfg = prepared.get("strategy", {})
-    for weight_key in ["target_weights", "max_weights", "min_weights"]:
-        weights = strategy_cfg.get(weight_key)
-        if isinstance(weights, dict):
-            normalized_weights = {}
-            for raw, value in weights.items():
-                raw_key = str(raw).strip()
-                normalized = symbol_map.get(raw_key) or symbol_map.get(raw_key.upper()) or web_normalize_symbol_for_market(raw, market)
-                normalized_weights[normalized] = value
-            strategy_cfg[weight_key] = normalized_weights
-
-    return prepared
-
-
-def localize_summary_values(df: pd.DataFrame, lang: str) -> pd.DataFrame:
-    output = df.copy()
-    for col in ["market", "strategy_type", "execution_timing", "rebalance_frequency"]:
-        if col in output.columns:
-            output[col] = output[col].map(lambda value: label_for(lang, value) if value else value)
-    return output
-
-
-def localize_trade_values(df: pd.DataFrame, lang: str) -> pd.DataFrame:
-    output = df.copy()
-    if "action" in output.columns:
-        output["action"] = output["action"].map(lambda value: label_for(lang, value))
-    return output
-
-
-def render_intro(lang: str) -> None:
-    st.markdown(tr(lang, "intro"))
-
-    step1, step2, step3 = st.columns(3)
-    step1.info(tr(lang, "step_1"))
-    step2.info(tr(lang, "step_2"))
-    step3.info(tr(lang, "step_3"))
-
-    with st.expander(tr(lang, "start_here"), expanded=True):
-        st.markdown(tr(lang, "workflow"))
-        t1, t2, t3 = st.columns(3)
-        with t1:
-            st.download_button(
-                tr(lang, "download_template"),
-                data=DEFAULT_UPLOAD_CONFIG.encode("utf-8"),
-                file_name="tradetest_config_template.yaml",
-                mime="application/x-yaml",
-                key=f"download_template_intro_{lang}",
-                use_container_width=True,
-            )
-        with t2:
-            st.download_button(
-                tr(lang, "download_china_template"),
-                data=CHINA_UPLOAD_CONFIG.encode("utf-8"),
-                file_name="tradetest_china_config_template.yaml",
-                mime="application/x-yaml",
-                key=f"download_china_template_intro_{lang}",
-                use_container_width=True,
-            )
-        with t3:
-            st.download_button(
-                tr(lang, "download_prompt"),
-                data=prompt_text(lang).encode("utf-8"),
-                file_name=f"tradetest_gpt_prompt_{lang}.txt",
-                mime="text/plain",
-                key=f"download_prompt_intro_{lang}",
-                use_container_width=True,
-            )
-
-        st.markdown(tr(lang, "copy_prompt"))
-        st.code(prompt_text(lang), language="text")
-
-    with st.expander(tr(lang, "settings_meaning")):
-        st.markdown(tr(lang, "settings_text"))
-
-    st.warning(tr(lang, "risk_warning"))
+def fmt_num(value: float | int | None) -> str:
+    if value is None or pd.isna(value):
+        return "--"
+    if value == float("inf"):
+        return "?"
+    return f"{float(value):,.2f}"
 
 
 def writable_temp_parent() -> Path:
@@ -692,60 +250,56 @@ def writable_temp_parent() -> Path:
     for parent in candidates:
         try:
             parent.mkdir(parents=True, exist_ok=True)
-            probe = parent / f".write_probe_{uuid4().hex}"
+            probe = parent / f".probe_{uuid4().hex}"
             probe.write_text("ok", encoding="utf-8")
             probe.unlink(missing_ok=True)
             return parent
         except OSError as exc:
             errors.append(f"{parent}: {exc}")
-
     raise PermissionError("No writable temporary directory is available. " + " | ".join(errors))
 
 
-def run_backtest_from_cfg(cfg: dict, config_text_raw: str, lang: str):
-    cfg = web_prepare_config(cfg)
-    config_text_raw = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
-    market = web_parse_market(cfg)
-    currency = cfg.get("account", {}).get("currency", web_currency_for_market(market))
+def normalize_legacy_config(cfg: dict) -> dict:
+    return backtest.prepare_config(cfg)
+
+
+def run_legacy_backtest(cfg: dict) -> tuple[pd.DataFrame, pd.DataFrame, dict, dict]:
+    cfg = normalize_legacy_config(cfg)
+    market = backtest.parse_market(cfg)
+    currency = cfg.get("account", {}).get("currency", backtest.currency_for_market(market))
     symbols, symbol_names = backtest.parse_symbols(cfg)
     start = cfg["data"]["start"]
     end = cfg["data"].get("end")
-
     initial_cash = float(cfg["account"]["initial_cash"])
     commission = float(cfg["costs"]["commission"])
     slippage = float(cfg["costs"]["slippage"])
-
     strategy_cfg = cfg.get("strategy", {})
     strategy_type = str(strategy_cfg.get("type", "ma_crossover")).strip().lower()
     execution_timing = str(strategy_cfg.get("execution_timing", "next_open")).strip().lower()
-    fast_ma = int(strategy_cfg.get("fast_ma", 20))
-    slow_ma = int(strategy_cfg.get("slow_ma", 60))
-
     open_prices, close_prices = backtest.download_prices(symbols, start, end)
 
     if strategy_type == "monthly_rebalance":
-        portfolio_df, trades_df = backtest.run_periodic_rebalance(
-            open_prices, close_prices, initial_cash, commission, slippage, strategy_cfg, execution_timing
-        )
+        portfolio_df, trades_df = backtest.run_periodic_rebalance(open_prices, close_prices, initial_cash, commission, slippage, strategy_cfg, execution_timing)
     else:
-        if fast_ma <= 0 or slow_ma <= 0 or fast_ma >= slow_ma:
-            raise ValueError(tr(lang, "invalid_ma"))
-        portfolio_df, trades_df = backtest.run_ma_portfolio(
-            open_prices, close_prices, initial_cash, commission, slippage, fast_ma, slow_ma, execution_timing
-        )
+        fast_ma = int(strategy_cfg.get("fast_ma", 20))
+        slow_ma = int(strategy_cfg.get("slow_ma", 60))
+        portfolio_df, trades_df = backtest.run_ma_portfolio(open_prices, close_prices, initial_cash, commission, slippage, fast_ma, slow_ma, execution_timing)
 
     final_equity = float(portfolio_df["equity"].iloc[-1])
     total_return = final_equity / initial_cash - 1.0
-    mdd = backtest.max_drawdown(portfolio_df["equity"])
-    buy_hold_return = sum(float(close_prices[s].iloc[-1] / close_prices[s].iloc[0] - 1.0) for s in symbols) / len(symbols)
-    rebalance_frequency = str(strategy_cfg.get("rebalance_frequency", "monthly")).strip().lower()
-
+    portfolio_df["drawdown"] = portfolio_df["equity"] / portfolio_df["equity"].cummax() - 1.0
+    bh_returns = [float(close_prices[s].iloc[-1] / close_prices[s].iloc[0] - 1.0) for s in symbols]
+    daily_returns = portfolio_df["equity"].pct_change().dropna()
+    sharpe = float(daily_returns.mean() / daily_returns.std() * (252 ** 0.5)) if len(daily_returns) > 1 and daily_returns.std() > 0 else 0.0
+    days = max(1, int((pd.to_datetime(portfolio_df["Date"].iloc[-1]) - pd.to_datetime(portfolio_df["Date"].iloc[0])).days))
+    annual_return = (1 + total_return) ** (365.25 / days) - 1 if total_return > -1 else -1.0
     summary = {
         "market": market,
         "currency": currency,
         "strategy_type": strategy_type,
+        "strategy_name": strategy_type,
         "execution_timing": execution_timing,
-        "rebalance_frequency": rebalance_frequency if strategy_type == "monthly_rebalance" else "",
+        "rebalance_frequency": str(strategy_cfg.get("rebalance_frequency", "")),
         "symbols": ",".join(symbols),
         "symbol_names": ",".join([f"{k}:{symbol_names.get(k, k)}" for k in symbols]),
         "start": str(pd.to_datetime(portfolio_df["Date"].iloc[0]).date()),
@@ -753,341 +307,323 @@ def run_backtest_from_cfg(cfg: dict, config_text_raw: str, lang: str):
         "initial_cash": initial_cash,
         "final_equity": final_equity,
         "total_return": total_return,
-        "max_drawdown": mdd,
+        "annual_return": annual_return,
+        "max_drawdown": float(portfolio_df["drawdown"].min()),
+        "sharpe_ratio": sharpe,
+        "win_rate": 0.0,
         "trade_count": int((trades_df["action"] == "BUY").sum()) if not trades_df.empty else 0,
-        "buy_hold_return": buy_hold_return,
+        "average_holding_days": 0.0,
+        "profit_factor": 0.0,
+        "cost_adjusted_return": total_return,
+        "buy_hold_return": float(sum(bh_returns) / len(bh_returns)) if bh_returns else 0.0,
     }
+    return portfolio_df, trades_df, summary, cfg
 
+
+def save_report(portfolio_df: pd.DataFrame, trades_df: pd.DataFrame, summary: dict, cfg: dict, config_yaml: str) -> tuple[bytes, bytes | None]:
     temp_parent = writable_temp_parent()
     temp_dir = temp_parent / f"run_{uuid4().hex}"
     temp_dir.mkdir(parents=True, exist_ok=True)
     try:
         cfg_path = temp_dir / "web_config.yaml"
-        cfg_path.write_text(config_text_raw, encoding="utf-8")
+        cfg_path.write_text(config_yaml, encoding="utf-8")
         backtest.save_outputs(temp_dir, portfolio_df, trades_df, summary, cfg, cfg_path)
         report_file = sorted(temp_dir.glob("backtest_report_*.xlsx"))[-1]
         chart_files = sorted(temp_dir.glob("equity_curve_*.png"))
-        report_bytes = report_file.read_bytes()
-        chart_bytes = chart_files[-1].read_bytes() if chart_files else None
+        return report_file.read_bytes(), chart_files[-1].read_bytes() if chart_files else None
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    return summary, portfolio_df, trades_df, report_bytes, chart_bytes
+
+def run_yaml_backtest(config_text: str) -> tuple[dict, pd.DataFrame, pd.DataFrame, bytes, bytes | None, str]:
+    cfg = yaml.safe_load(config_text)
+    if not isinstance(cfg, dict):
+        raise ValueError("YAML must be a mapping.")
+    if rule_engine.is_standard_rule_config(cfg):
+        portfolio_df, trades_df, summary, prepared_cfg = rule_engine.run_rule_backtest(cfg)
+    else:
+        portfolio_df, trades_df, summary, prepared_cfg = run_legacy_backtest(cfg)
+    prepared_yaml = yaml.safe_dump(prepared_cfg, sort_keys=False, allow_unicode=True)
+    report_bytes, chart_bytes = save_report(portfolio_df, trades_df, summary, prepared_cfg, prepared_yaml)
+    return summary, portfolio_df, trades_df, report_bytes, chart_bytes, prepared_yaml
 
 
-def render_result(summary, portfolio_df, trades_df, report_bytes, lang: str):
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric(tr(lang, "final_equity"), f"{summary['final_equity']:.2f}")
-    m2.metric(tr(lang, "total_return"), f"{summary['total_return']:.2%}")
-    m3.metric(tr(lang, "max_drawdown"), f"{summary['max_drawdown']:.2%}")
-    m4.metric(tr(lang, "trade_count"), str(summary["trade_count"]))
-    st.caption(tr(lang, "metrics_caption"))
+def save_cloud_run_safely(cloud: CloudStore, terminal_id: str, config_name: str, config_yaml: str, summary: dict, report_bytes: bytes, chart_bytes: bytes | None, lang: str) -> None:
+    if not cloud.enabled:
+        return
+    try:
+        saved = cloud.save_run(terminal_id=terminal_id, config_name=config_name, config_yaml=config_yaml, summary=summary, report_bytes=report_bytes, chart_bytes=chart_bytes)
+        if saved:
+            st.toast(tr(lang, "saved_to_cloud"))
+    except Exception as exc:
+        st.warning(f"Cloud save failed: {exc}")
 
-    fig = px.line(portfolio_df, x="Date", y="equity", title=tr(lang, "equity_curve"))
-    fig.update_layout(height=460, margin=dict(l=16, r=16, t=48, b=16))
-    st.plotly_chart(fig, use_container_width=True)
-    st.caption(tr(lang, "equity_caption"))
 
-    st.markdown(tr(lang, "summary_table"))
-    st.dataframe(rename_columns(localize_summary_values(pd.DataFrame([summary]), lang), SUMMARY_LABELS[lang]), use_container_width=True)
+def build_manual_yaml(
+    market: str,
+    symbol: str,
+    start: str,
+    end: str,
+    initial_cash: float,
+    execution_price: str,
+    commission_pct: float,
+    slippage_pct: float,
+    strategy_type: str,
+    short_window: int,
+    long_window: int,
+    rsi_window: int,
+    entry_threshold: float,
+    exit_threshold: float,
+) -> str:
+    if strategy_type == "moving_average_cross":
+        cfg = yaml_builder.build_moving_average_config(market, symbol, start, end or None, initial_cash, execution_price, commission_pct, slippage_pct, short_window, long_window)
+    elif strategy_type == "rsi_reversal":
+        cfg = yaml_builder.build_rsi_reversal_config(market, symbol, start, end or None, initial_cash, execution_price, commission_pct, slippage_pct, rsi_window, entry_threshold, exit_threshold)
+    else:
+        raise ValueError("Only Moving Average Cross and RSI Reversal are supported in V2 first release.")
+    return yaml_builder.config_to_yaml(cfg)
 
-    empty_cols = ["date", "symbol", "action", "price", "shares", "commission", "cash_after"]
-    display_trades = trades_df if not trades_df.empty else pd.DataFrame(columns=empty_cols)
-    st.markdown(tr(lang, "trade_log"))
-    st.dataframe(rename_columns(localize_trade_values(display_trades, lang), TRADE_LABELS[lang]), use_container_width=True, height=280)
 
-    st.download_button(
-        tr(lang, "download_report"),
-        data=report_bytes,
-        file_name="backtest_report.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key=f"download_report_{lang}",
-        use_container_width=True,
+def inject_css() -> None:
+    st.markdown(
+        """
+<style>
+:root { --navy:#061727; --panel:#ffffff; --muted:#64748b; --line:#d8e1ec; --teal:#00a99d; --teal2:#18c4b5; --danger:#dc2626; }
+.stApp { background: linear-gradient(180deg, #f5f8fc 0%, #eef4f8 100%); color:#0f172a; }
+[data-testid="stSidebar"] { background: linear-gradient(180deg, #061727 0%, #08243c 100%); }
+[data-testid="stSidebar"] * { color:#e5edf7 !important; }
+.block-container { padding-top: 0.85rem; max-width: 1800px; }
+.trade-header { background:linear-gradient(90deg,#061727,#08213a); color:white; padding:16px 22px; border-radius:0 0 18px 18px; margin-bottom:14px; display:flex; align-items:center; justify-content:space-between; box-shadow:0 10px 28px rgba(6,23,39,.18); }
+.brand { font-size:24px; font-weight:800; letter-spacing:-.02em; }
+.subtitle { color:#b6c7d8; font-size:13px; margin-left:12px; }
+.card { background:white; border:1px solid #d9e3ee; border-radius:12px; padding:16px; box-shadow:0 8px 22px rgba(15,23,42,.05); }
+.card h3 { margin:0 0 14px 0; font-size:16px; }
+.stepbar { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin:8px 0 16px; }
+.step { background:#fff; border:1px solid #d9e3ee; border-radius:999px; padding:9px 12px; font-size:13px; color:#475569; display:flex; align-items:center; gap:8px; }
+.step b { background:#cbd5e1; color:#0f172a; border-radius:999px; width:24px; height:24px; display:inline-flex; align-items:center; justify-content:center; }
+.step.active b { background:linear-gradient(135deg,#00a99d,#1dd3c3); color:white; }
+.metric-grid { display:grid; grid-template-columns:repeat(8,1fr); gap:10px; }
+.metric-card { background:#fff; border:1px solid #d9e3ee; border-radius:12px; padding:13px; }
+.metric-label { color:#64748b; font-size:12px; }
+.metric-value { color:#0f766e; font-size:22px; font-weight:800; margin-top:6px; }
+.metric-value.negative { color:#dc2626; }
+.footer-note { color:#94a3b8; font-size:12px; text-align:center; padding:10px; }
+.stButton > button[kind="primary"] { background:linear-gradient(135deg,#00a99d,#12c8b6) !important; border:0 !important; color:white !important; font-weight:800 !important; border-radius:10px !important; box-shadow:0 10px 22px rgba(0,169,157,.28); }
+.stButton > button[kind="secondary"] { border-color:#b7c7d8 !important; color:#0f172a !important; border-radius:10px !important; }
+pre { border-radius:10px !important; }
+@media (max-width: 1100px) { .stepbar { grid-template-columns:repeat(2,1fr); } .metric-grid { grid-template-columns:repeat(2,1fr); } }
+</style>
+""",
+        unsafe_allow_html=True,
     )
 
 
-def build_cfg_from_wizard(
-    market,
-    mode_strategy,
-    symbol_text,
-    start,
-    end,
-    initial_cash,
-    commission,
-    slippage,
-    execution_timing,
-    fast_ma,
-    slow_ma,
-    rebalance_frequency,
-    rebalance_threshold,
-    cash_buffer,
-    lang,
-):
-    symbols = [s.strip() for s in symbol_text.split(",") if s.strip()]
-    if not symbols:
-        raise ValueError(tr(lang, "invalid_tickers"))
-
-    currency = web_currency_for_market(market)
-    data_part = {"market": market, "start": str(start), "end": str(end) if end else None}
-    if len(symbols) == 1:
-        data_part["symbol"] = symbols[0]
-    else:
-        data_part["symbols"] = {s: s for s in symbols}
-
-    cfg = {
-        "data": data_part,
-        "account": {"initial_cash": float(initial_cash), "currency": currency},
-        "costs": {"commission": float(commission), "slippage": float(slippage)},
-        "strategy": {"type": mode_strategy, "execution_timing": execution_timing},
-        "report": {"output_dir": "results"},
-    }
-
-    if mode_strategy == "monthly_rebalance":
-        weight = 1.0 / len(symbols)
-        cfg["strategy"].update(
-            {
-                "target_weights": {s: weight for s in symbols},
-                "rebalance_frequency": rebalance_frequency,
-                "rebalance_threshold": float(rebalance_threshold),
-                "cash_buffer": float(cash_buffer),
-                "max_weights": {s: min(1.0, weight * 1.5) for s in symbols},
-                "min_weights": {s: 0.0 for s in symbols},
-            }
-        )
-    else:
-        cfg["strategy"].update({"fast_ma": int(fast_ma), "slow_ma": int(slow_ma)})
-    return cfg
-
-
-st.set_page_config(page_title=APP_NAME, page_icon="TT", layout="wide")
-
-cloud = CloudStore(get_streamlit_secrets())
-with st.sidebar:
-    lang_label = st.selectbox("Language / 语言", ["中文", "English"], index=0, key="language_selector")
-    lang = "zh" if lang_label == "中文" else "en"
-
-    st.header(tr(lang, "cloud"))
-    terminal_id = st.text_input(tr(lang, "terminal_id"), value=default_terminal_id(), key="terminal_id")
-    config_name = st.text_input(tr(lang, "config_name"), value="web_config", key="config_name")
-    if cloud.enabled:
-        st.success(tr(lang, "cloud_enabled"))
-    else:
-        st.info(tr(lang, "cloud_disabled"))
-
-st.title(APP_NAME)
-st.caption(tr(lang, "caption"))
-
-render_intro(lang)
-
-main_tab, history_tab = st.tabs([tr(lang, "run_tab"), tr(lang, "history_tab")])
-
-with main_tab:
-    mode = st.radio(
-        tr(lang, "config_source"),
-        ["guided", "upload"],
-        horizontal=True,
-        format_func=lambda value: tr(lang, "guided_form") if value == "guided" else tr(lang, "upload_yaml"),
-        key="config_source",
+def render_header(lang: str) -> None:
+    st.markdown(
+        f"""
+<div class="trade-header">
+  <div><span class="brand">TradeTest</span><span class="subtitle">{tr(lang, 'app_subtitle')}</span></div>
+  <div>{tr(lang, 'docs')} ? ? ? ?</div>
+</div>
+""",
+        unsafe_allow_html=True,
     )
 
-    if mode == "guided":
-        market = st.radio(
-            tr(lang, "market"),
-            ["western", "china"],
-            horizontal=True,
-            help=tr(lang, "market_help"),
-            format_func=lambda value: label_for(lang, value),
-            key="market_selector",
-        )
-        currency = web_currency_for_market(market)
-        st.info(tr(lang, "currency_notice").format(currency=currency))
 
-        with st.form("wizard_form"):
-            c1, c2, c3 = st.columns(3)
-            mode_strategy = c1.selectbox(
-                tr(lang, "strategy"),
-                ["monthly_rebalance", "ma_crossover"],
-                index=0,
-                help=tr(lang, "strategy_help"),
-                format_func=lambda value: label_for(lang, value),
-                key="strategy_selector",
-            )
-            execution_timing = c2.selectbox(
-                tr(lang, "execution"),
-                ["next_open"],
-                index=0,
-                help=tr(lang, "execution_help"),
-                format_func=lambda value: label_for(lang, value),
-                key="execution_selector",
-            )
-            rebalance_frequency = c3.selectbox(
-                tr(lang, "rebalance"),
-                ["daily", "weekly", "monthly"],
-                index=2,
-                help=tr(lang, "rebalance_help"),
-                format_func=lambda value: label_for(lang, value),
-                key="rebalance_selector",
-            )
+def render_steps(lang: str, active: int = 3) -> None:
+    labels = [tr(lang, "data_settings"), tr(lang, "input_method"), tr(lang, "strategy_settings"), tr(lang, "yaml_preview"), tr(lang, "run_backtest"), tr(lang, "results")]
+    html = '<div class="stepbar">'
+    for idx, label in enumerate(labels, start=1):
+        klass = "step active" if idx in {1, active} else "step"
+        html += f'<div class="{klass}"><b>{idx}</b><span>{label}</span></div>'
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
 
-            c4, c5, c6 = st.columns(3)
-            start = c4.text_input(tr(lang, "start"), value="2021-05-10", help=f"{tr(lang, 'start_help')} {tr(lang, 'date_format_help')}", key="start_input")
-            end = c5.text_input(tr(lang, "end"), value="", help=f"{tr(lang, 'end_help')} {tr(lang, 'date_format_help')}", key="end_input")
-            default_tickers = "600519,000001,510300" if market == "china" else "VFV.TO,QQC.TO,TSLA.NE"
-            symbol_text = c6.text_input(tr(lang, "tickers"), value=default_tickers, help=tr(lang, "tickers_help"), key=f"tickers_input_{market}")
 
-            c7, c8, c9 = st.columns(3)
-            initial_cash = c7.number_input(tr(lang, "initial_cash"), min_value=1.0, value=10000.0, step=1000.0, help=tr(lang, "initial_cash_help"), key="initial_cash_input")
-            commission = c8.number_input(tr(lang, "commission"), min_value=0.0, value=1.0, step=0.1, help=tr(lang, "commission_help"), key="commission_input")
-            slippage = c9.number_input(tr(lang, "slippage"), min_value=0.0, value=0.001, step=0.0001, format="%.4f", help=tr(lang, "slippage_help"), key="slippage_input")
+def render_metric_cards(summary: dict, lang: str) -> None:
+    items = [
+        ("total_return", fmt_pct(summary.get("total_return"))),
+        ("annual_return", fmt_pct(summary.get("annual_return"))),
+        ("max_drawdown", fmt_pct(summary.get("max_drawdown"))),
+        ("sharpe_ratio", fmt_num(summary.get("sharpe_ratio"))),
+        ("win_rate", fmt_pct(summary.get("win_rate"))),
+        ("trade_count", str(summary.get("trade_count", 0))),
+        ("profit_factor", fmt_num(summary.get("profit_factor"))),
+        ("buy_hold_return", fmt_pct(summary.get("buy_hold_return"))),
+    ]
+    html = '<div class="metric-grid">'
+    for key, value in items:
+        neg = " negative" if str(value).startswith("-") else ""
+        html += f'<div class="metric-card"><div class="metric-label">{tr(lang, key)}</div><div class="metric-value{neg}">{value}</div></div>'
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
 
-            c10, c11, c12, c13 = st.columns(4)
-            fast_ma = c10.number_input(tr(lang, "fast_ma"), min_value=1, value=20, step=1, help=tr(lang, "fast_ma_help"), key="fast_ma_input")
-            slow_ma = c11.number_input(tr(lang, "slow_ma"), min_value=2, value=60, step=1, help=tr(lang, "slow_ma_help"), key="slow_ma_input")
-            rebalance_threshold = c12.number_input(tr(lang, "threshold"), min_value=0.0, value=0.05, step=0.01, format="%.2f", help=tr(lang, "threshold_help"), key="threshold_input")
-            cash_buffer = c13.number_input(tr(lang, "cash_buffer"), min_value=0.0, value=0.02, step=0.01, format="%.2f", help=tr(lang, "cash_buffer_help"), key="cash_buffer_input")
 
-            run_clicked = st.form_submit_button(tr(lang, "run_backtest"), type="primary", use_container_width=True)
+def render_results(summary: dict, portfolio_df: pd.DataFrame, trades_df: pd.DataFrame, report_bytes: bytes, lang: str) -> None:
+    st.markdown(f"### ? {tr(lang, 'results')} ({summary.get('start')} ? {summary.get('end')})")
+    render_metric_cards(summary, lang)
+    c1, c2, c3 = st.columns([1.25, 1.0, 1.0])
+    with c1:
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=portfolio_df["Date"], y=portfolio_df["equity"], name="Strategy", line=dict(color="#00a99d", width=2)))
+        if "buy_hold_equity" in portfolio_df.columns:
+            fig.add_trace(go.Scatter(x=portfolio_df["Date"], y=portfolio_df["buy_hold_equity"], name="Buy & Hold", line=dict(color="#94a3b8", width=1.5)))
+        fig.update_layout(title=tr(lang, "equity_curve"), height=330, margin=dict(l=20, r=20, t=48, b=20), paper_bgcolor="white", plot_bgcolor="white")
+        st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        drawdown = portfolio_df.get("drawdown")
+        if drawdown is None:
+            drawdown = portfolio_df["equity"] / portfolio_df["equity"].cummax() - 1.0
+        fig = go.Figure(go.Scatter(x=portfolio_df["Date"], y=drawdown, fill="tozeroy", name="Drawdown", line=dict(color="#14b8a6")))
+        fig.update_layout(title=tr(lang, "drawdown_curve"), height=330, margin=dict(l=20, r=20, t=48, b=20), paper_bgcolor="white", plot_bgcolor="white", yaxis_tickformat=".0%")
+        st.plotly_chart(fig, use_container_width=True)
+    with c3:
+        st.markdown(f"**{tr(lang, 'recent_trades')}**")
+        if trades_df.empty:
+            st.info("No trades")
+        else:
+            cols = [c for c in ["date", "symbol", "action", "price", "shares", "pnl_pct", "holding_days"] if c in trades_df.columns]
+            st.dataframe(trades_df[cols].tail(8), use_container_width=True, height=285)
+        st.download_button(tr(lang, "export_report"), data=report_bytes, file_name="backtest_report.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True, key=f"download_result_report_{lang}")
+
+
+def render_new_backtest(lang: str, cloud: CloudStore, terminal_id: str, config_name: str) -> None:
+    render_steps(lang)
+    input_method = st.radio(tr(lang, "input_method"), ["manual", "upload"], horizontal=True, format_func=lambda v: tr(lang, "manual_strategy") if v == "manual" else tr(lang, "upload_yaml"), key="v2_input_method")
+
+    if input_method == "manual":
+        left, mid, right = st.columns([0.85, 1.9, 1.55], gap="medium")
+        with left:
+            st.markdown(f"### ? {tr(lang, 'data_settings')}")
+            market = st.radio(tr(lang, "market"), ["western", "china"], format_func=lambda v: tr(lang, v), horizontal=True, key="v2_market")
+            default_symbol = "510300" if market == "china" else "AAPL"
+            symbol = st.text_input(tr(lang, "symbol"), value=default_symbol, key=f"v2_symbol_{market}")
+            start = st.text_input(tr(lang, "start"), value="2020-01-01", key="v2_start")
+            end = st.text_input(tr(lang, "end"), value="", key="v2_end")
+            initial_cash = st.number_input(tr(lang, "initial_cash"), min_value=1.0, value=10000.0 if market == "western" else 100000.0, step=1000.0, key=f"v2_cash_{market}")
+            execution_price = st.selectbox(tr(lang, "execution_price"), ["next_open", "close"], index=0, key="v2_execution")
+            commission_pct = st.number_input(tr(lang, "commission_pct"), min_value=0.0, value=0.001, step=0.0001, format="%.4f", key="v2_commission")
+            slippage_pct = st.number_input(tr(lang, "slippage_pct"), min_value=0.0, value=0.001, step=0.0001, format="%.4f", key="v2_slippage")
+
+        with mid:
+            st.markdown(f"### ? {tr(lang, 'strategy_settings')}")
+            strategy_type = st.selectbox(tr(lang, "strategy_type"), ["moving_average_cross", "rsi_reversal"], format_func=lambda v: tr(lang, "ma_cross") if v == "moving_average_cross" else tr(lang, "rsi_reversal"), key="v2_strategy")
+            st.caption(tr(lang, "coming_next"))
+            if strategy_type == "moving_average_cross":
+                c1, c2 = st.columns(2)
+                short_window = c1.number_input(tr(lang, "short_window"), min_value=1, value=20, step=1, key="v2_short")
+                long_window = c2.number_input(tr(lang, "long_window"), min_value=2, value=60, step=1, key="v2_long")
+                rsi_window, entry_threshold, exit_threshold = 14, 30.0, 70.0
+            else:
+                c1, c2, c3 = st.columns(3)
+                rsi_window = c1.number_input(tr(lang, "rsi_window"), min_value=1, value=14, step=1, key="v2_rsi_window")
+                entry_threshold = c2.number_input(tr(lang, "entry_threshold"), min_value=0.0, max_value=100.0, value=30.0, step=1.0, key="v2_rsi_entry")
+                exit_threshold = c3.number_input(tr(lang, "exit_threshold"), min_value=0.0, max_value=100.0, value=70.0, step=1.0, key="v2_rsi_exit")
+                short_window, long_window = 20, 60
+            st.markdown("&nbsp;", unsafe_allow_html=True)
+            run_clicked = st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key="v2_run_manual")
+
+        try:
+            generated_yaml = build_manual_yaml(market, symbol, start, end, initial_cash, execution_price, commission_pct, slippage_pct, strategy_type, int(short_window), int(long_window), int(rsi_window), float(entry_threshold), float(exit_threshold))
+        except Exception as exc:
+            generated_yaml = f"# {exc}"
+
+        with right:
+            st.markdown(f"### ? {tr(lang, 'yaml_preview')}")
+            edit_yaml = st.toggle(tr(lang, "edit_yaml"), value=False, key="v2_edit_yaml")
+            if edit_yaml:
+                yaml_text = st.text_area("YAML", value=generated_yaml, height=390, key="v2_manual_yaml_edit")
+            else:
+                yaml_text = generated_yaml
+                st.code(yaml_text, language="yaml")
+            st.download_button(tr(lang, "copy_yaml"), data=yaml_text.encode("utf-8"), file_name="tradetest_strategy.yaml", mime="application/x-yaml", use_container_width=True, key="v2_download_yaml")
 
         if run_clicked:
             try:
-                cfg = build_cfg_from_wizard(
-                    market,
-                    mode_strategy,
-                    symbol_text,
-                    start,
-                    end,
-                    initial_cash,
-                    commission,
-                    slippage,
-                    execution_timing,
-                    fast_ma,
-                    slow_ma,
-                    rebalance_frequency,
-                    rebalance_threshold,
-                    cash_buffer,
-                    lang,
-                )
-                cfg = web_prepare_config(cfg)
-                cfg_text = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
-                st.code(cfg_text, language="yaml")
-                summary, portfolio_df, trades_df, report_bytes, chart_bytes = run_backtest_from_cfg(cfg, cfg_text, lang)
-                saved = cloud.save_run(
-                    terminal_id=terminal_id,
-                    config_name=config_name,
-                    config_yaml=cfg_text,
-                    summary=summary,
-                    report_bytes=report_bytes,
-                    chart_bytes=chart_bytes,
-                )
-                if saved:
-                    st.toast(tr(lang, "saved_to_cloud"))
-                render_result(summary, portfolio_df, trades_df, report_bytes, lang)
-            except Exception as e:
-                st.error(f"{tr(lang, 'run_failed')}: {e}")
-
+                summary, portfolio_df, trades_df, report_bytes, chart_bytes, prepared_yaml = run_yaml_backtest(yaml_text)
+                save_cloud_run_safely(cloud, terminal_id, config_name, prepared_yaml, summary, report_bytes, chart_bytes, lang)
+                st.session_state["latest_result"] = (summary, portfolio_df, trades_df, report_bytes)
+            except Exception as exc:
+                st.error(f"{tr(lang, 'run_failed')}: {exc}")
     else:
-        if "config_text" not in st.session_state:
-            st.session_state.config_text = DEFAULT_UPLOAD_CONFIG
-        if "yaml_text_area" not in st.session_state:
-            st.session_state.yaml_text_area = st.session_state.config_text
-        u1, u2, u3 = st.columns(3)
-        with u1:
-            st.download_button(
-                tr(lang, "download_template"),
-                data=DEFAULT_UPLOAD_CONFIG.encode("utf-8"),
-                file_name="tradetest_config_template.yaml",
-                mime="application/x-yaml",
-                key=f"download_template_upload_{lang}",
-                use_container_width=True,
-            )
-        with u2:
-            st.download_button(
-                tr(lang, "download_china_template"),
-                data=CHINA_UPLOAD_CONFIG.encode("utf-8"),
-                file_name="tradetest_china_config_template.yaml",
-                mime="application/x-yaml",
-                key=f"download_china_template_upload_{lang}",
-                use_container_width=True,
-            )
-        with u3:
-            st.download_button(
-                tr(lang, "download_prompt"),
-                data=prompt_text(lang).encode("utf-8"),
-                file_name=f"tradetest_gpt_prompt_{lang}.txt",
-                mime="text/plain",
-                key=f"download_prompt_upload_{lang}",
-                use_container_width=True,
-            )
         st.caption(tr(lang, "yaml_tip"))
-        uploaded = st.file_uploader(tr(lang, "upload_config"), type=["yaml", "yml"], key="yaml_uploader")
+        uploaded = st.file_uploader(tr(lang, "upload_config"), type=["yaml", "yml"], key="v2_upload_file")
+        if "v2_upload_text" not in st.session_state:
+            st.session_state["v2_upload_text"] = STANDARD_MA_TEMPLATE
         if uploaded is not None:
             uploaded_bytes = uploaded.getvalue()
             upload_signature = hashlib.sha256(uploaded_bytes).hexdigest()
-            if st.session_state.get("last_upload_signature") != upload_signature:
-                uploaded_text = uploaded_bytes.decode("utf-8")
-                st.session_state.config_text = uploaded_text
-                st.session_state.yaml_text_area = uploaded_text
-                st.session_state.last_upload_signature = upload_signature
-        config_text = st.text_area(tr(lang, "yaml_label"), height=420, key="yaml_text_area")
-        st.session_state.config_text = config_text
-
-        if st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key=f"run_upload_{lang}"):
+            if st.session_state.get("v2_upload_sig") != upload_signature:
+                st.session_state["v2_upload_text"] = uploaded_bytes.decode("utf-8")
+                st.session_state["v2_upload_sig"] = upload_signature
+        st.download_button("MA YAML Template", data=STANDARD_MA_TEMPLATE.encode("utf-8"), file_name="ma_cross.yaml", mime="application/x-yaml", key="ma_template")
+        st.download_button("RSI YAML Template", data=STANDARD_RSI_TEMPLATE.encode("utf-8"), file_name="rsi_reversal.yaml", mime="application/x-yaml", key="rsi_template")
+        yaml_text = st.text_area("YAML", value=st.session_state["v2_upload_text"], height=520, key="v2_upload_yaml")
+        st.session_state["v2_upload_text"] = yaml_text
+        if st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key="v2_run_upload"):
             try:
-                cfg = web_prepare_config(yaml.safe_load(config_text))
-                prepared_config_text = yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
-                summary, portfolio_df, trades_df, report_bytes, chart_bytes = run_backtest_from_cfg(cfg, prepared_config_text, lang)
-                saved = cloud.save_run(
-                    terminal_id=terminal_id,
-                    config_name=config_name,
-                    config_yaml=prepared_config_text,
-                    summary=summary,
-                    report_bytes=report_bytes,
-                    chart_bytes=chart_bytes,
-                )
-                if saved:
-                    st.toast(tr(lang, "saved_to_cloud"))
-                render_result(summary, portfolio_df, trades_df, report_bytes, lang)
-            except Exception as e:
-                st.error(f"{tr(lang, 'run_failed')}: {e}")
+                summary, portfolio_df, trades_df, report_bytes, chart_bytes, prepared_yaml = run_yaml_backtest(yaml_text)
+                save_cloud_run_safely(cloud, terminal_id, config_name, prepared_yaml, summary, report_bytes, chart_bytes, lang)
+                st.session_state["latest_result"] = (summary, portfolio_df, trades_df, report_bytes)
+            except Exception as exc:
+                st.error(f"{tr(lang, 'run_failed')}: {exc}")
 
-with history_tab:
-    st.markdown(tr(lang, "history_intro"))
+    if "latest_result" in st.session_state:
+        summary, portfolio_df, trades_df, report_bytes = st.session_state["latest_result"]
+        render_results(summary, portfolio_df, trades_df, report_bytes, lang)
+
+
+def render_history(lang: str, cloud: CloudStore) -> None:
+    st.markdown(f"### {tr(lang, 'cloud_history')}")
+    st.caption(tr(lang, "history_intro"))
     if not cloud.enabled:
         st.info(tr(lang, "history_disabled"))
+        return
+    try:
+        runs = cloud.list_runs()
+        if not runs:
+            st.info(tr(lang, "no_runs"))
+            return
+        df = pd.DataFrame(runs)
+        cols = [c for c in ["created_at", "terminal_id", "config_name", "strategy_type", "symbols", "total_return", "max_drawdown", "trade_count"] if c in df.columns]
+        st.dataframe(df[cols], use_container_width=True, height=420)
+        selected = st.selectbox(tr(lang, "open_run"), df["id"].tolist(), format_func=lambda x: f"{df[df['id'] == x].iloc[0]['created_at']} | {df[df['id'] == x].iloc[0]['config_name']}", key="history_selector")
+        row = df[df["id"] == selected].iloc[0]
+        st.code(row.get("config_yaml", ""), language="yaml")
+        if row.get("chart_png_url"):
+            st.image(row["chart_png_url"], use_container_width=True)
+        if row.get("report_xlsx_url"):
+            st.link_button(tr(lang, "open_report"), row["report_xlsx_url"], use_container_width=True)
+    except Exception as exc:
+        st.error(str(exc))
+
+
+def main() -> None:
+    st.set_page_config(page_title=APP_NAME, page_icon="TT", layout="wide")
+    inject_css()
+    cloud = CloudStore(get_streamlit_secrets())
+
+    with st.sidebar:
+        lang_label = st.selectbox(TEXT["zh"]["language"], ["??", "English"], index=0, key="language_selector")
+        lang = "zh" if lang_label == "??" else "en"
+        st.markdown("## TradeTest")
+        page = st.radio("", ["new", "history"], format_func=lambda v: tr(lang, "new_backtest") if v == "new" else tr(lang, "cloud_history"), key="page_selector")
+        st.markdown("---")
+        st.markdown(f"### {tr(lang, 'cloud')}")
+        terminal_id = st.text_input(tr(lang, "terminal_id"), value=default_terminal_id(), key="terminal_id")
+        config_name = st.text_input(tr(lang, "config_name"), value="web_config", key="config_name")
+        if cloud.enabled:
+            st.success(tr(lang, "cloud_enabled"))
+        else:
+            st.info(tr(lang, "cloud_disabled"))
+
+    render_header(lang)
+    if page == "new":
+        render_new_backtest(lang, cloud, terminal_id, config_name)
     else:
-        try:
-            runs = cloud.list_runs()
-            if not runs:
-                st.info(tr(lang, "no_runs"))
-            else:
-                df = pd.DataFrame(runs)
-                history_cols = [
-                    "created_at",
-                    "terminal_id",
-                    "config_name",
-                    "strategy_type",
-                    "symbols",
-                    "total_return",
-                    "max_drawdown",
-                    "trade_count",
-                    "report_xlsx_url",
-                ]
-                st.dataframe(
-                    rename_columns(localize_summary_values(df[history_cols], lang), HISTORY_LABELS[lang]),
-                    use_container_width=True,
-                    height=420,
-                )
-                selected = st.selectbox(
-                    tr(lang, "open_run"),
-                    df["id"].tolist(),
-                    format_func=lambda x: f"{df[df['id'] == x].iloc[0]['created_at']} | {df[df['id'] == x].iloc[0]['config_name']}",
-                    key="history_run_selector",
-                )
-                row = df[df["id"] == selected].iloc[0]
-                st.code(row["config_yaml"], language="yaml")
-                if row.get("chart_png_url"):
-                    st.image(row["chart_png_url"], use_container_width=True)
-                if row.get("report_xlsx_url"):
-                    st.link_button(tr(lang, "open_report"), row["report_xlsx_url"], use_container_width=True)
-        except Exception as e:
-            st.error(f"{tr(lang, 'history_failed')}: {e}")
+        render_history(lang, cloud)
+    st.markdown(f'<div class="footer-note">{tr(lang, "risk")}</div>', unsafe_allow_html=True)
+
+
+if __name__ == "__main__":
+    main()

@@ -16,6 +16,59 @@ python backtest.py
 
 ## YAML Format
 
+TradeTest V2 uses a standard rule-based YAML format for manual strategies and uploaded YAML.
+The V2 rule engine currently supports single-symbol daily stock/ETF strategies:
+`moving_average_cross` and `rsi_reversal`.
+
+V2 Moving Average Cross:
+
+```yaml
+strategy:
+  name: "Moving Average Cross"
+  type: "moving_average_cross"
+
+data:
+  market: "western"
+  symbols:
+    - AAPL
+  timeframe: "1d"
+  start: "2020-01-01"
+  end: null
+
+indicators:
+  short_ma:
+    type: "sma"
+    field: "close"
+    window: 20
+  long_ma:
+    type: "sma"
+    field: "close"
+    window: 60
+
+entry:
+  all:
+    - left: "short_ma"
+      operator: "cross_above"
+      right: "long_ma"
+
+exit:
+  any:
+    - left: "short_ma"
+      operator: "cross_below"
+      right: "long_ma"
+
+position:
+  mode: "full_position"
+  initial_cash: 10000
+
+execution:
+  price: "next_open"
+
+cost:
+  commission_pct: 0.001
+  slippage_pct: 0.001
+```
+
 Single symbol MA crossover:
 
 ```yaml
