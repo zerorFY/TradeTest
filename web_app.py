@@ -382,6 +382,136 @@ def symbol_display_name(symbol: str, market: str) -> str:
     return names.get(symbol.strip().upper(), "Stock / ETF")
 
 
+def ui_text(lang: str, zh: str, en: str) -> str:
+    return zh if lang == "zh" else en
+
+
+LOCAL_SYMBOLS = {
+    "western": [
+        {"symbol": "QQQ", "name": "Invesco QQQ Trust", "exchange": "NASDAQ", "currency": "USD"},
+        {"symbol": "QQQM", "name": "Invesco NASDAQ 100 ETF", "exchange": "NASDAQ", "currency": "USD"},
+        {"symbol": "AAPL", "name": "Apple Inc.", "exchange": "NASDAQ", "currency": "USD"},
+        {"symbol": "MSFT", "name": "Microsoft Corporation", "exchange": "NASDAQ", "currency": "USD"},
+        {"symbol": "SPY", "name": "SPDR S&P 500 ETF Trust", "exchange": "NYSE Arca", "currency": "USD"},
+        {"symbol": "VFV.TO", "name": "Vanguard S&P 500 Index ETF", "exchange": "TSX", "currency": "CAD"},
+        {"symbol": "QQC.TO", "name": "Invesco NASDAQ 100 Index ETF", "exchange": "TSX", "currency": "CAD"},
+        {"symbol": "TSLA.NE", "name": "Tesla Canadian Depositary Receipt", "exchange": "Cboe Canada", "currency": "CAD"},
+    ],
+    "china": [
+        {"symbol": "510300.SS", "name": "沪深300 ETF", "exchange": "上海证券交易所", "currency": "CNY"},
+        {"symbol": "510500.SS", "name": "中证500 ETF", "exchange": "上海证券交易所", "currency": "CNY"},
+        {"symbol": "588000.SS", "name": "科创50 ETF", "exchange": "上海证券交易所", "currency": "CNY"},
+        {"symbol": "600519.SS", "name": "贵州茅台", "exchange": "上海证券交易所", "currency": "CNY"},
+        {"symbol": "000001.SZ", "name": "平安银行", "exchange": "深圳证券交易所", "currency": "CNY"},
+        {"symbol": "159915.SZ", "name": "创业板 ETF", "exchange": "深圳证券交易所", "currency": "CNY"},
+    ],
+}
+
+
+def candidate_key(candidate: dict) -> str:
+    return str(candidate.get("symbol", "")).strip().upper()
+
+
+def unique_candidates(candidates: list[dict]) -> list[dict]:
+    seen = set()
+    out = []
+    for candidate in candidates:
+        key = candidate_key(candidate)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(candidate)
+    return out
+
+
+def search_symbol_candidates(query: str, market: str) -> list[dict]:
+    q = str(query or "").strip()
+    if not q:
+        return []
+    q_upper = q.upper()
+    q_lower = q.lower()
+    candidates = []
+
+    for item in LOCAL_SYMBOLS.get(market, []):
+        if q_lower in item["symbol"].lower() or q_lower in item["name"].lower():
+            candidates.append({**item, "market": market, "source": "local"})
+
+    if market == "china":
+        try:
+            normalized = backtest.normalize_symbol_for_market(q, "china")
+            candidates.append(
+                {
+                    "symbol": normalized,
+                    "name": symbol_display_name(normalized, "china"),
+                    "exchange": "上海/深圳",
+                    "currency": "CNY",
+                    "market": "china",
+                    "source": "normalized",
+                }
+            )
+        except ValueError:
+            pass
+        return unique_candidates(candidates)
+
+    try:
+        search = backtest.yf.Search(q_upper, max_results=8)
+        for item in getattr(search, "quotes", []) or []:
+            symbol = str(item.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            try:
+                normalized = backtest.normalize_symbol_for_market(symbol, "western")
+            except ValueError:
+                continue
+            quote_type = str(item.get("quoteType") or "").upper()
+            if quote_type and quote_type not in {"EQUITY", "ETF", "MUTUALFUND"}:
+                continue
+            candidates.append(
+                {
+                    "symbol": normalized,
+                    "name": item.get("shortname") or item.get("longname") or item.get("name") or normalized,
+                    "exchange": item.get("exchDisp") or item.get("exchange") or "",
+                    "currency": item.get("currency") or "",
+                    "market": "western",
+                    "source": "yfinance",
+                }
+            )
+    except Exception:
+        pass
+
+    if not candidates:
+        try:
+            normalized = backtest.normalize_symbol_for_market(q_upper, "western")
+            candidates.append(
+                {
+                    "symbol": normalized,
+                    "name": "Unverified ticker",
+                    "exchange": "",
+                    "currency": "",
+                    "market": "western",
+                    "source": "manual",
+                }
+            )
+        except ValueError:
+            pass
+    return unique_candidates(candidates)
+
+
+def format_candidate(candidate: dict) -> str:
+    parts = [str(candidate.get("symbol", "")), str(candidate.get("name", ""))]
+    meta = [str(candidate.get("exchange", "")), str(candidate.get("currency", ""))]
+    meta_text = " / ".join([x for x in meta if x])
+    return " | ".join([x for x in parts + ([meta_text] if meta_text else []) if x])
+
+
+def confirmed_key(market: str, mode: str) -> str:
+    return f"confirmed_symbols_{market}_{mode}"
+
+
+def candidates_key(market: str, mode: str) -> str:
+    return f"symbol_candidates_{market}_{mode}"
+
+
 def writable_temp_parent() -> Path:
     candidates = []
     if os.environ.get("TRADETEST_TMP_DIR"):
@@ -551,6 +681,44 @@ def build_manual_yaml(
     else:
         raise ValueError("Only Moving Average Cross and RSI Reversal are supported in V2 first release.")
     return yaml_builder.config_to_yaml(cfg)
+
+
+def build_portfolio_yaml(data: dict, rebalance_frequency: str, rebalance_threshold: float, cash_buffer: float, commission_abs: float) -> str:
+    rows = data.get("portfolio_rows", [])
+    if len(rows) < 2:
+        raise ValueError("Portfolio mode requires at least two confirmed symbols.")
+    weight_sum = sum(float(row.get("weight_pct", 0.0)) for row in rows)
+    if abs(weight_sum - 100.0) > 0.01:
+        raise ValueError(f"Portfolio weights must add up to 100%. Current total: {weight_sum:.2f}%.")
+
+    symbols = {row["symbol"]: row.get("name") or row["symbol"] for row in rows}
+    target_weights = {row["symbol"]: round(float(row.get("weight_pct", 0.0)) / 100.0, 6) for row in rows}
+    cfg = {
+        "data": {
+            "market": data["market"],
+            "symbols": symbols,
+            "start": data["start"],
+            "end": data["end"] or None,
+        },
+        "account": {
+            "initial_cash": float(data["initial_cash"]),
+            "currency": currency_for_market_ui(data["market"]),
+        },
+        "costs": {
+            "commission": float(commission_abs),
+            "slippage": float(data["slippage_pct"]),
+        },
+        "strategy": {
+            "type": "monthly_rebalance",
+            "execution_timing": "next_open",
+            "target_weights": target_weights,
+            "rebalance_frequency": rebalance_frequency,
+            "rebalance_threshold": float(rebalance_threshold),
+            "cash_buffer": float(cash_buffer),
+        },
+        "report": {"output_dir": "results"},
+    }
+    return yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)
 
 
 def inject_css() -> None:
@@ -1083,9 +1251,87 @@ def render_data_panel(lang: str) -> dict:
     with st.container(border=True):
         section_title(1, tr(lang, "data_settings"))
         market = st.radio(tr(lang, "market"), ["western", "china"], format_func=lambda v: tr(lang, v), horizontal=True, key="v2_market")
-        default_symbol = "510300" if market == "china" else "AAPL"
-        symbol = st.text_input(tr(lang, "symbol"), value=default_symbol, help=tr(lang, "symbol_help"), key=f"v2_symbol_{market}")
-        st.caption(symbol_display_name(symbol, market))
+        mode = st.radio(
+            ui_text(lang, "标的模式", "Symbol Mode"),
+            ["single", "portfolio"],
+            horizontal=True,
+            format_func=lambda v: ui_text(lang, "单标的", "Single") if v == "single" else ui_text(lang, "组合", "Portfolio"),
+            key=f"symbol_mode_{market}",
+        )
+
+        default_symbol = "510300" if market == "china" else "QQQ"
+        query = st.text_input(
+            ui_text(lang, "搜索标的", "Search Symbol"),
+            value=default_symbol,
+            help=tr(lang, "symbol_help"),
+            key=f"symbol_query_{market}_{mode}",
+        )
+        search_cols = st.columns([0.58, 0.42])
+        if search_cols[0].button(ui_text(lang, "搜索候选", "Search"), use_container_width=True, key=f"search_symbol_{market}_{mode}"):
+            st.session_state[candidates_key(market, mode)] = search_symbol_candidates(query, market)
+        if search_cols[1].button(ui_text(lang, "清空确认", "Clear"), use_container_width=True, key=f"clear_confirmed_{market}_{mode}"):
+            st.session_state[confirmed_key(market, mode)] = []
+
+        candidates = st.session_state.get(candidates_key(market, mode), [])
+        if candidates:
+            selected_label = st.selectbox(
+                ui_text(lang, "选择并确认一个候选", "Select and confirm a candidate"),
+                [format_candidate(item) for item in candidates],
+                key=f"candidate_select_{market}_{mode}",
+            )
+            selected = candidates[[format_candidate(item) for item in candidates].index(selected_label)]
+            if st.button(ui_text(lang, "确认使用这个标的", "Confirm This Symbol"), use_container_width=True, key=f"confirm_symbol_{market}_{mode}"):
+                key = confirmed_key(market, mode)
+                confirmed = list(st.session_state.get(key, []))
+                if mode == "single":
+                    selected["weight_pct"] = 100.0
+                    confirmed = [selected]
+                else:
+                    existing = {candidate_key(item) for item in confirmed}
+                    if candidate_key(selected) not in existing:
+                        selected["weight_pct"] = round(100.0 / max(1, len(confirmed) + 1), 2)
+                        confirmed.append(selected)
+                st.session_state[key] = confirmed
+        else:
+            st.caption(ui_text(lang, "请输入关键字并点击搜索；未确认标的不能运行回测。", "Enter a keyword and search. Backtest cannot run until a symbol is confirmed."))
+
+        confirmed = list(st.session_state.get(confirmed_key(market, mode), []))
+        if confirmed:
+            if mode == "single":
+                st.success(ui_text(lang, "已确认：", "Confirmed: ") + format_candidate(confirmed[0]))
+            else:
+                st.caption(ui_text(lang, "已确认组合；权重总和必须等于 100%。", "Confirmed portfolio. Weights must add up to 100%."))
+                editable = pd.DataFrame(
+                    [
+                        {
+                            "symbol": item["symbol"],
+                            "name": item.get("name", item["symbol"]),
+                            "weight_pct": float(item.get("weight_pct", 0.0)),
+                        }
+                        for item in confirmed
+                    ]
+                )
+                edited = st.data_editor(
+                    editable,
+                    hide_index=True,
+                    use_container_width=True,
+                    disabled=["symbol", "name"],
+                    column_config={
+                        "symbol": st.column_config.TextColumn(ui_text(lang, "标的", "Symbol")),
+                        "name": st.column_config.TextColumn(ui_text(lang, "名称", "Name")),
+                        "weight_pct": st.column_config.NumberColumn(ui_text(lang, "权重 %", "Weight %"), min_value=0.0, max_value=100.0, step=1.0),
+                    },
+                    key=f"portfolio_editor_{market}",
+                )
+                for idx, item in enumerate(confirmed):
+                    item["weight_pct"] = float(edited.iloc[idx]["weight_pct"])
+                st.session_state[confirmed_key(market, mode)] = confirmed
+                weight_sum = sum(float(item.get("weight_pct", 0.0)) for item in confirmed)
+                if abs(weight_sum - 100.0) <= 0.01:
+                    st.success(ui_text(lang, "组合权重合计 100%。", "Portfolio weights add up to 100%."))
+                else:
+                    st.warning(ui_text(lang, f"当前权重合计 {weight_sum:.2f}%，需要等于 100%。", f"Current total weight is {weight_sum:.2f}%; it must equal 100%."))
+
         start = st.text_input(tr(lang, "start"), value="2020-01-01", key="v2_start")
         end = st.text_input(tr(lang, "end"), value="", key="v2_end")
         currency = currency_for_market_ui(market)
@@ -1104,9 +1350,18 @@ def render_data_panel(lang: str) -> dict:
         commission_pct = st.number_input(tr(lang, "commission_pct"), min_value=0.0, value=0.001, step=0.0001, format="%.4f", key="v2_commission")
         slippage_pct = st.number_input(tr(lang, "slippage_pct"), min_value=0.0, value=0.001, step=0.0001, format="%.4f", key="v2_slippage")
         st.button(tr(lang, "more_data_options"), use_container_width=True, disabled=True, key="more_data_options")
+    portfolio_rows = [
+        {"symbol": item["symbol"], "name": item.get("name", item["symbol"]), "weight_pct": float(item.get("weight_pct", 0.0))}
+        for item in confirmed
+    ]
+    is_ready = bool(portfolio_rows) if mode == "single" else len(portfolio_rows) >= 2 and abs(sum(row["weight_pct"] for row in portfolio_rows) - 100.0) <= 0.01
     return {
         "market": market,
-        "symbol": symbol,
+        "mode": mode,
+        "symbol": portfolio_rows[0]["symbol"] if portfolio_rows else "",
+        "symbol_name": portfolio_rows[0]["name"] if portfolio_rows else "",
+        "portfolio_rows": portfolio_rows,
+        "is_ready": is_ready,
         "start": start,
         "end": end,
         "initial_cash": initial_cash,
@@ -1120,6 +1375,38 @@ def render_data_panel(lang: str) -> dict:
 def render_strategy_panel(lang: str, data: dict) -> tuple[str, bool]:
     with st.container(border=True):
         section_title(3, f'{tr(lang, "manual_strategy")} (Manual Strategy)')
+        if data["mode"] == "portfolio":
+            st.caption(ui_text(lang, "组合模式使用固定权重调仓；单标的 MA / RSI 信号策略不会套到组合上。", "Portfolio mode uses fixed-weight rebalancing; single-symbol MA / RSI signals are not applied to the portfolio."))
+            param_group(ui_text(lang, "组合调仓参数", "Portfolio Rebalance Parameters"))
+            p1, p2, p3 = st.columns(3)
+            rebalance_frequency = p1.selectbox(
+                ui_text(lang, "调仓频率", "Rebalance Frequency"),
+                ["monthly", "weekly", "daily"],
+                format_func=lambda v: {"monthly": ui_text(lang, "月度", "Monthly"), "weekly": ui_text(lang, "周度", "Weekly"), "daily": ui_text(lang, "日度", "Daily")}[v],
+                key="portfolio_rebalance_frequency",
+            )
+            rebalance_threshold = p2.number_input(ui_text(lang, "调仓阈值", "Rebalance Threshold"), min_value=0.0, max_value=1.0, value=0.05, step=0.01, format="%.2f", key="portfolio_rebalance_threshold")
+            cash_buffer = p3.number_input(ui_text(lang, "现金保留", "Cash Buffer"), min_value=0.0, max_value=0.5, value=0.02, step=0.01, format="%.2f", key="portfolio_cash_buffer")
+            c1, c2 = st.columns(2)
+            commission_abs = c1.number_input(ui_text(lang, "每笔固定手续费", "Fixed Commission Per Trade"), min_value=0.0, value=1.0, step=0.5, key="portfolio_commission_abs")
+            c2.text_input(ui_text(lang, "执行价格", "Execution Price"), value="next_open", disabled=True, key="portfolio_execution_next_open")
+            if data["execution_price"] != "next_open":
+                st.warning(ui_text(lang, "组合调仓当前只支持 next_open，已在 YAML 中自动使用 next_open。", "Portfolio rebalancing currently supports next_open only; YAML will use next_open."))
+            try:
+                generated_yaml = build_portfolio_yaml(data, rebalance_frequency, rebalance_threshold, cash_buffer, commission_abs)
+            except Exception as exc:
+                generated_yaml = f"# {exc}"
+            run_clicked = st.button(
+                tr(lang, "run_backtest"),
+                type="primary",
+                use_container_width=True,
+                key="v2_run_portfolio",
+                disabled=not data["is_ready"],
+            )
+            if not data["is_ready"]:
+                st.info(ui_text(lang, "请至少确认两个标的，并把权重调到 100%，然后才能运行组合回测。", "Confirm at least two symbols and set total weight to 100% before running."))
+            return generated_yaml, run_clicked
+
         strategy_type = st.selectbox(
             tr(lang, "strategy_type"),
             ["moving_average_cross", "rsi_reversal"],
@@ -1155,27 +1442,30 @@ def render_strategy_panel(lang: str, data: dict) -> tuple[str, bool]:
         r2.text_input(tr(lang, "position_pct"), value="100%", disabled=True, key="position_pct")
         r3.selectbox(tr(lang, "stop_loss"), [tr(lang, "none")], key="stop_loss")
 
-        try:
-            generated_yaml = build_manual_yaml(
-                data["market"],
-                data["symbol"],
-                data["start"],
-                data["end"],
-                data["initial_cash"],
-                data["execution_price"],
-                data["commission_pct"],
-                data["slippage_pct"],
-                strategy_type,
-                int(short_window),
-                int(long_window),
-                int(rsi_window),
-                float(entry_threshold),
-                float(exit_threshold),
-            )
-        except Exception as exc:
-            generated_yaml = f"# {exc}"
+        if not data["is_ready"]:
+            generated_yaml = "# " + ui_text(lang, "请先搜索并确认一个标的，确认后这里会生成可运行的 YAML。", "Search and confirm one symbol first. A runnable YAML config will appear here after confirmation.")
+        else:
+            try:
+                generated_yaml = build_manual_yaml(
+                    data["market"],
+                    data["symbol"],
+                    data["start"],
+                    data["end"],
+                    data["initial_cash"],
+                    data["execution_price"],
+                    data["commission_pct"],
+                    data["slippage_pct"],
+                    strategy_type,
+                    int(short_window),
+                    int(long_window),
+                    int(rsi_window),
+                    float(entry_threshold),
+                    float(exit_threshold),
+                )
+            except Exception as exc:
+                generated_yaml = f"# {exc}"
 
-        run_clicked = st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key="v2_run_manual")
+        run_clicked = st.button(tr(lang, "run_backtest"), type="primary", use_container_width=True, key="v2_run_manual", disabled=not data["is_ready"])
     return generated_yaml, run_clicked
 
 
